@@ -1,0 +1,76 @@
+<div class="content">
+<div class="section">
+
+<h1>?(L.youraccount) <sup><small>(<a href="/signout">signout</a>?)</small></sup></h1>
+<? if request.client.keychain.Permit and request.client.keychain.Permit.createsite then ?>
+<p>You've verified your email address, now <a href="/?(L.setup)">create your ?(site.name) site</a>.</p>
+<? end ?>
+<?
+if temp.user.emails and temp.user.emails[1] then temp.email = temp.user.emails[1].address end
+if temp.user.telephones and temp.user.telephones[1] then temp.telephone = temp.user.telephones[1].number end
+?>
+<form method="post" enctype="multipart/form-data">
+<fieldset>
+		<legend>Details</legend>
+<label>Formal name</label>: <? tag.input {name="name", value=request.form.name or user.name, size=36} ?><br>
+<label>Informal name</label>: <? tag.input {name="nickname", value=request.form.nickname or user.nickname, size=36} ?><br>
+<label>Email</label>: <? tag.input {name="email", value=request.form.email or temp.email, size=36} ?><br>
+<label>Telephone</label>: <? tag.input {name="telephone", value=request.form.telephone or temp.telephone, size=18} ?><br>
+<br>
+<legend>Image:</legend>
+<? if user.avatar then ?>
+<img src="/users/?(util.EncodeID(user.id))/avatar.jpg" height="72" style="float:left;margin-right:1em">
+<? end ?>
+<input type="file" name="avatar"><br><small>or <input type="checkbox" name="generate_avatar"/> Make Random</small>
+
+<br clear="all"><br>
+<label>New password</label>: <input type="text" size="16" name="password"><br>
+
+<? scribe.Mark "account#details" ?>
+<br>
+</fieldset>
+<fieldset>
+		<legend>Settings</legend>
+		<label>Culture</label> <? tag.Countries("locale",request.client.locale) ?><br/>
+		<label>Language</label> <? tag.select{name="language", selected=request.client.language, options=terms.languages, localise=false} ?><br/>
+		<label>Timezone</label> <? tag.select{name="timezone", selected=request.client.timezone, insert=copy(locale.timezones), options=moonstalk.timezones, localise=false} ?><br/><!-- TODO: if not set, use JS to set a default; this could also be done with a cookie (and possibly also AJAX) by the moonstalk() function -->
+
+</fieldset>
+<p><input type="submit" value="?(L.save)"><input type="hidden" name="action" value="UpdateUser"></p>
+</form>
+
+<fieldset>
+		<legend>Keychain</legend>
+<!-- TODO: show expired keys, which are not included in the active request.client.keychain -->
+<p>For this site you <?
+local keys,also
+if request.client.keychain.Manager then also=", and" ?>
+are a designated <a href="/manager">Manager</a><?
+request.client.keychain.Manager=nil end
+keys = util.TableToText(request.client.keychain,"<b>","</b>",", ")
+if keys then ?>?(also) hold the keys: ?(keys)<? else ?>hold no keys<? end ?>.
+</p>
+<? if temp.user.keychains[site.id] then temp.user.keychains[site.id]=nil end
+if next(temp.user.keychains) then ?>
+<ul>
+<? for id,keychain in pairs(temp.user.keychains or {}) do
+if not keychain.name and tonumber(id) then id = l.unknown end ?>
+<li>For <a href="http://?(keychain.domain or node.hostname)/my/account">?(keychain.name or id)</a> you hold the keys: ?(util.TableToText(keychain,"<b>","</b>",", ")).
+<? end ?>
+</ul>
+<? end ?>
+
+</fieldset>
+<fieldset>
+		<legend>Sessions</legend>
+<p>These are your recent sign-ins. If you don't recognise one you should delete it and change your password.</p><!-- TODO: session deletion -->
+<ol>
+<? for _,session in ipairs(util.SortArrayByKey(temp.user.sessions or {},"active",true)) do ?>
+<li><? if not session.active then ?>Signed-out<? else ?>Used<? end ?> ?(tag.time(session.active or session.last)) <? local place = geo.LocateIp(session.ip) if place then ?>in ?(l["country_"..place.country_code])<? else ?>from ?(session.ip)<? end ?>, first used ?(format.Date(session.created)) with ?(session.agent or 'unknown').
+<? end ?>
+</ol>
+</fieldset>
+
+<? scribe.Extensions ("generic/account", {record=record}) ?>
+
+</div></div>

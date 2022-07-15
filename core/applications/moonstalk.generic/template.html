@@ -1,0 +1,17 @@
+<html>
+	<head>
+		<title>?(page.title or (site.name .. "/" .. page.address))</title>
+		<meta http-equiv="content-type" content="text/html;charset=utf-8" />
+		<link href="/moonstalk.generic/public/page.css" rel="stylesheet" type="text/css" media="all" />
+		<meta name="Generator" content="Moonstalk" />
+	</head>
+	<body marginwidth="100" marginheight="50">
+
+?(wrap([[<div id="message" onclick="$('#message').slideUp()">]],page.message,[[</div>]]))
+
+<? scribe.Insert "content" ?>
+
+<div id="poweredby">?(l.poweredby) <a href="http://moonstalk.org/" style="text-decoration:none;color:#b7bf27">Moonstalk<img src="/moonstalk.generic/public/favicon.ico" width="16" height="16" align="baseline" border="0"></a></div>
+
+	</body>
+</html>

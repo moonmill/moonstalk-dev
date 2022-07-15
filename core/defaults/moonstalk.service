@@ -1,0 +1,23 @@
+[Unit]
+Description=Moonstalk
+After=network.target
+
+[Service]
+User=root
+Type=forking
+WorkingDirectory=/usr/local/moonstalk
+Environment=moonstalk=/usr/local/moonstalk
+TimeoutSec=0
+PIDFile=/var/run/moonstalk.pid
+ExecStart=/usr/local/moonstalk/runner start
+ExecStop=/usr/local/moonstalk/runner stop
+ExecReload=/usr/local/moonstalk/runner restart
+KillMode=mixed
+
+Restart=always
+RestartSec=1s
+
+StandardOutput=null
+
+[Install]
+WantedBy=default.target

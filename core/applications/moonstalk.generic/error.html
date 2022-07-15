@@ -1,0 +1,66 @@
+<?
+-- NOTE: if the error view or controller contain errors themselves they will not be displayed and an empty response will result
+page.title="Server Error"
+
+local function ul(val)
+	if string.sub(val,1,4) == "http" then
+		return '<a href="'..val..'">'..string.sub(val,8)..'</a>'
+	elseif string.find(val,"@",1,false) then
+		return '<a href="mailto:'..val..'?subject=Error on '..request.domain..request.path..'&body=I got an error: --'..(page.error[1].descr or page.error[1].realm)..' -- whilst browsing from '..(request.referrer or "[direct]")..'.">'..val..'</a>'
+	else return val end
+end
+
+local function info(owner)
+	write "<ul>"
+	for _,info in ipairs(owner) do
+		write("<li>"..ul(info).."</li>")
+	end
+	write "</ul>"
+end
+
+local function items (errors)
+	for _,item in ipairs(errors or {}) do
+		write[[<li><b>]] write(item.title) write[[</b><br>]]
+		if item.detail then
+			if string.sub(item.detail,1,4)=="[str" then item.detail = string.sub(item.detail,8) end
+			write(web.SafeText(item.detail))
+		end
+		if item.trace and node.dev then write(item.trace) end
+		write[[</li>]]
+	end
+end
+
+?>
+<div class="content">
+<div class="section">
+<h1>?(l.errorhead)</h1>
+<p>We're sorry, a problem prevented your request from being served.<br>
+<b><a href="javascript:location.reload()">Please try again now</a></b>, or a bit later once a real person has had a chance to investigate.
+</p>
+<h3>Problem details</h3>
+<ol><? items(page.error) ?></ol>
+
+<? if node.dev or logging >3 then ?>
+<hr style="width:100%;height:0;border:0;border-top:1px #eeeeee solid;margin-bottom:3px">
+<small style="color:grey"><i>the following are shown only in dev mode</i></small><br><br>
+	<? if #site.errors >0 then ?>
+	<h3>Site issues</h3>
+	<ol><? items(site.errors) ?></ol>
+	<? end ?>
+	<? if #moonstalk.errors >0 then ?>
+	<h3>Moonstalk issues</h3>
+	<ol><? items(moonstalk.errors) ?></ol>
+	<? end ?>
+<? end ?>
+
+<? if site and site.owner then ?>
+<h3>This site's owner is</h3>
+?(info(site.owner))
+<? end if node.owner then ?>
+<h3>This server's operator is</h3>
+<? info(node.owner) ?>
+<? end ?>
+</div>
+</div>
+
+<? page.error = nil ?>

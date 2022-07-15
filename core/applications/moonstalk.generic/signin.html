@@ -1,0 +1,42 @@
+<div class="content"><div class="section">
+
+<h1>?(L.identify)</h1>
+
+<? local reminder if not empty(page.data) then ?><p class="error">
+<? 	if page.data.error =="invalid" then request.form.password = "" reminder=true ?>
+	?(l.signin_invalid)
+<? 	elseif page.data.error =="disabled" then request.form.password = "" reminder=true ?>
+	?(l.signin_disabled)
+<? 	elseif page.data.error =="unknown" then request.form.email = "" ?>
+	?(l.signin_unknown)
+<? 	elseif page.data.error =="unverified" then reminder=true ?>
+	?(l.signin_unverified)
+<? 	end ?>
+<? if reminder then
+	if string.find(request.form.email or "","@") then ?>
+		?(macro{l.signin_reminder, address=request.form.email})
+	<? else request.form.email="" ?>
+		?(l.signin_remind)
+	<? end ?>
+<? 	end ?>
+</p>
+<? end ?>
+
+<form method="post" name="signin">
+
+<ul class="smlabel">
+
+<li><b style="font-size:1.2em">?(l.identifier)</b>:<br>
+<input type="text" name="email" value="?(request.form.email)" size="32" />
+<br>?(l.signin_email_hint)<br><br>
+<li><b style="font-size:1.2em">?(l.password)</b>:<br>
+<input type="password" name="password" value="?(request.form.password)" />
+<br>?(signin_password_hint)
+</ul>
+<p>?(signin_tip)</p>
+
+<input type="hidden" name="action" value="Signin">
+<input type="submit" value="?(L.actionsignin)" />
+</form>
+
+</div></div>

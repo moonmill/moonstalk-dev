@@ -1,0 +1,879 @@
+#!/usr/bin/env lua5.1
+
+--[[	Moonstalk Elevator
+		Copyright 2010, Jacob Jay.
+		Free software, under the Artistic Licence 2.0.
+		http://moonstalk.org
+--]]
+
+local help = [[
+
+*NAME*
+	elevator - control and configure Moonstalk hosting and web application servers
+
+*SYNOPSIS*
+	*elevator* [_operation_ ... ] [_server_ ... ] [_setting_=_value_]
+
+*DESCRIPTION*
+	The elevator utility is the primary interface for managing the Moonstalk servers. It takes any of the following optional parameters in any order.
+
+	*operation*
+	(_no arguments_)
+		Performs configuration, checks and displays status. This is a required first-use step from a root or user account (not with sudo).
+	_status_
+		Displays process status (i.e. running or not) of each server. For detailed status when servers are running, open _http://localhost/manager_.
+	_start_
+		Execute servers that are not already running.
+	_stop_
+		Terminate servers after they've finished processing their current transactions.
+	_restart_
+		Note that this is not always the same as _stop start_ e.g. Openresty uses _restart_ to reload without interrupting requests, whilst _stop start_ will terminate the server then start it; FastCGI backends can also be restarted semi-gracefully (some are kept running whilst others are terminated). If database.lua or functions.lua files have been changed the database should also be restarted.
+	_kill_
+		Terminate servers immediately. This will interrupt current requests and database operations.
+	_newsecret_
+		Generate new encryption secret key. Will cause all sessions and protected URLs to be invalidated. Files saved using tokens for encoded IDs will cease to encode/decode to their corresponding values, therefore unless both values are saved, files using tokens will separately need to be renamed or removed.
+	_update_
+		Perform a pull and clean update for each of the repositories specified in Host.lua. Note that the SSH key used to access the repositories should be unique to the node, and should not have a password. If the servers are running they will be restarted. *Warning*: any local changes to tracked files will be overwritten.
+	_autostart_
+		Installs a startup script for _start all_. This is installed by default on first use for Linux only. The moonstalk directory cannot be changed after installation.
+-- TODO: _host_ _path/_
+		Defines a directory for a deployment with separate applications, sites, data, and configuration, yet sharing the same Moonstalk root (version, default applications, library, etc.). If the directory does not already exist it will be created and populated with defaults (symlinks for applications and library), if it exists it will be updated from the root. Once created Moonstalk must be invoked directly from this directory for use with that 'host' deployment. You can specify path simply as _name_ and the directory will be created as moonstalk/hosts/_name_. Note that this utility only reports server status for the running host, not for the invoked location as only one host may be run at a time.
+
+	*server*
+	_all_     (default)
+	_web_     or synonyms: lighttpd, nginx, http
+		Handles all content. Requires root or sudo user privileges. Runs as the user defined in Host.lua or the current user.
+	_pages_   or synonyms: scribe, backend, backends
+		Handles all pages. Runs as the user defined in Host.lua or the current user. With Openresty this is a synonym for it as both share the same process.
+	_data_    or synonyms: teller, database, db
+		Handles dynamic pages. Runs as the user defined as node.teller.user or the current user.
+
+	*setting*
+	This allows you to change a value in the data/configuration/Host.lua file. If no value if provided, the default or nil will be used. Common parameters are:
+	_logging_		= _0–5_
+		A number representing the level of log detail to be saved, zero being none, and 5 being most; 4 or greater will enable developer mode.
+	_hostname_	= _FQDN_
+		The hostname of this server, and the domain at which the Manager administration pages can be accessed.
+	_instances_	= _1-99_
+		The number of server threads/processes to be used. Default is twice the number of CPU cores. If changed the web and pages servers must be restarted. E.g.: _./elevator restart pages web instances=4_
+
+*NOTICE*
+	The Moonstalk project comprises many components, see website for details.
+	Core components are copyright 2010–2019, Jacob Jay.
+	Free software, under the Artistic Licence 2.0.
+	http://moonstalk.org
+]]
+-- TODO: migrate to a coroutine based system that updates all server statuses simultaneously (ones in sequence can display "pending…" in grey); additionally the now deferred integrity checks (e.g. full scribe env) should occur after this with a "Checking scribe inegrity"
+
+-- # namespaces
+
+display 		= {}
+run 			= {}
+elevator = {
+	config		= {prior={}},
+	errors		= {},
+	functions 	= {},
+	servers = {}, -- synonyms
+	actions = {
+		restart 	= "restart",
+		start 		= "start",
+		stop 		= "stop",
+		kill 		= "stop",
+		status 		= "status",
+	},
+	commands = {
+		host 		= "host",
+		update 		= "update",
+		pull 		= "update",
+		newsecret	= "newsecret",
+		autostart	= "autostart",
+	},
+	captures = {
+		host		= "host",
+	},
+	flags = {
+		all			= true,
+	},
+	-- define function sequences; anything not specified here is run afterwards in an arbitrary order
+	sequences = {
+		status	= { "init", "host", "newsecret", "update"},
+		start	= { "rotatelog", "init", "newsecret", "update", "web",}, -- server startup order doesn't really matter, and teller will likely not finish before any other server
+		stop	= { "web",},
+	},
+}
+
+
+-- # required directories and files
+if not arg[1] then -- only when used with no arguments (./elevator) do we initialise directories and files
+	os.execute("mkdir -p temporary/upload temporary/dumps sites public/tenants public/users data/tenants data/configuration data/users applications; touch temporary/elevator.log; > temporary/elevator.log; touch temporary/moonstalk.log; chmod 664 temporary/moonstalk.log") -- on first run we must create the log as default user, on each run we clear the log regardless of user, can can't use rm as it doesn't have a quiet mode for first use -- NOTE: this assumes first run is as default user so we must add staff
+end
+
+-- # basic dependencies
+
+dofile"core/moonstalk/server.lua"
+-- NOTE: we cannot yet require any modules not already in the moonstalk install path; luarocks modules are managed further down
+
+terminal = import "core/moonstalk/terminal.lua"; terminal.init()
+local format = terminal.format
+include("core/globals/Deployment.lua",elevator)
+
+function display.title(text)
+	if display.titled then
+		terminal.reverse(format.bold.."\n  Moonstalk  ") -- 13 chars
+		display.titled = false
+	end
+	if text then
+		local fill = terminal.columns -16 -#terminal.unstyle(text) -- mast is 13, and we add 3 spaces indent
+		terminal.style("_   "..text..string.rep(' ',fill).."_\n",terminal.output)
+		display.titled = true
+	end
+end
+display.titled=true; display.title()
+
+
+-- # defaults
+
+node.locale = node.locale or "eu"
+
+
+-- # checks
+
+if not util.SysInfo() then
+	terminal.erroneous"This platform is not supported."
+	print" Supported platforms are Linux and Darwin."
+	os.exit(1)
+elseif not util.FileExists(moonstalk.root.."/elevator") then
+	terminal.erroneous"Cannot start" print": please change to your moonstalk directory"
+	os.exit(1)
+else
+	-- record where we are in the shell environment for later introspection when not run from the correct dir
+	-- util.Shell("export moonstalk="..moonstalk.root)
+end
+
+
+
+-- # help
+-- we do this here otherwise module checks will interrupt
+if arg[1] and string.find(arg[1],'help') then terminal.style (help) os.exit() end
+
+
+-- # utilities
+
+function display.error (message,note,formatter,multi)
+	formatter = formatter or "erroneous"
+	if note~=false then terminal[formatter](" [note "..(#elevator.errors + 1).."]") if not multi then print"" end end
+	table.insert(elevator.errors,{message=message,format=formatter})
+end
+function display.status (title,subtitle)
+	subtitle = subtitle or ""
+	terminal.output"  " terminal.bold(title) terminal.output(subtitle)
+	terminal.output(string.rep(" ",28 - #(title..subtitle))) terminal.output":  "
+end
+function display.concaterr(err)
+	if err.class=="lua" then return err.detail end
+	if err.title then return err.title..". "..(err.detail or "") end
+	return err.detail
+end
+
+function en_plural(num,singular,plural) if num ==1 then return singular or "" else return plural or "s" end end
+
+function SaveConfig()
+	local result,err = moonstalk.SaveConfig()
+	if not result then print(err) os.exit(1) end -- TODO: when run with sudo (e.g. first use) subsequent uses without sudo cannot write
+end
+function Errors()
+	if moonstalk.errors[1] then
+		if moonstalk.errors.significance <= log.levels.Alert then
+			terminal.erroneous" Initialisation Failed"
+			terminal.output"\n"
+			for i,error in ipairs(moonstalk.errors) do
+				local origin = (_G[error.origin] or {}).name or ""
+				if error.level <=log.levels.Priority then
+					terminal.output(format.red(origin))
+				elseif error.level <=log.levels.Alert then
+					terminal.output(format.yellow(origin))
+				elseif error.level <=log.levels.Notice then
+					terminal.output(origin)
+				-- ignore others
+				end
+				terminal.output(" "..display.concaterr(error))
+				terminal.output"\n"
+			end
+			os.exit(1)
+		end
+	end
+end
+
+
+-- # dependency checks
+-- this is a standalone routine reliant only on the shell with grep so we can handle mis-installation and future additions without modules being present; it finds all required modules, then can install Luarocks packages
+
+elevator.modules={
+	-- library names do not always match package names therefore we must map correct names in order to find whats missing and required
+	-- require statements may define behaviours for the elevator with a lua table in a comment following the call, where all values are optional and comments may then follow the table
+	-- require"modulename" -- {manager="luarocks", package="package-name",}
+	-- package=false to prevent installation; or instead of package use url="https://example.org/module.rockspec"
+	-- TODO: support for opm (openresty)
+	-- modules may be listed manually here however in general should not be
+	-- where multiple require statements define different behaviours for the same module name, package="name" is preferred over url, over false, and the first declared name is preserved
+	['crypto']			={package="luacrypto"},
+}
+
+local modules = {}
+local install = {}
+do
+local function findmodule(name)
+	name = {name}
+	if string.find(name[1],'.',1,true) then
+		name[2] = string.gsub(name[1],'%.','/') -- to match wsapi/submodule.lua from "wsapi.submodule"
+		name[3] = string.match(name[1],'([^.]+)') -- to match posix.so from "posix.submodule"
+	end
+	for _,name in ipairs(name) do
+		for path in string.gmatch(moonstalk.path..";"..package.cpath..";","[^;]+") do -- TODO: support server envionrments such as opm and tarantool
+			local path,matched = string.gsub(path,'%?',name)
+			if matched >0 then -- ignore paths without a filename replacement e.g. loadall.so
+				local file = io.open(path)
+				if file then file:close() return true end
+			end
+		end
+	end
+end
+local function checkmodules(dir,directories)
+	if directories~=false then directories ="-R --include *.lua --exclude *test.lua --exclude-dir include --exclude-dir test " else directories ="" end -- don't examine files inside an directory named include
+	local shell = io.popen([[grep -H ]]..directories..[["require \?(\?\"" ]]..dir)
+	for line in shell:lines() do
+		local file,name,comment = string.match(line,"^(.-):.-require ?%(?[\"'](.-)['\"]%-?%-?(.*)")
+		if file and not string.find(file,"/_",1,true) and module~=nil and elevator.modules[name]~=false and not string.find(line,":[%s]*%-%-") and not string.find(name,"/",1,true) then -- ignores disabled files, commented out, local packages (containing /) which are already available; the pattern also ignores pcall(require,… which are obviously conditional
+			local module,error
+			if comment then
+				comment = string.match(comment, "({[^%}]+})")
+				if comment then
+					module,error = loadstring("return "..comment)()
+					if error then print(error) end -- TODO: proper output
+				end
+			end
+			local module = module or {}
+			elevator.modules[name] = elevator.modules[name] or {}
+			local default = elevator.modules[name]
+			if default.package ==nil then default.package = name end
+			default.name = default.name or name
+			if not default.package then -- also replaces false
+				default.package = module.package
+				default.manager = module.manager or "luarocks"
+			end
+			module.manager = module.manager or "luarocks"
+			default.files = default.files or {}
+			if module.package ~=false then
+				modules[default.package] = default
+				if not findmodule(default.name) then table.insert(install, default); install[default.name]=true end
+			end
+			table.insert( default.files, file )
+			-- we're not checking if the module actually works, although it would be good however is incompatible with server implementations whose modules cannot be tested outside their server environments
+		end
+	end
+end
+
+local luarocks = os.execute("which luarocks > /dev/null") ==0
+-- we use moonstalk modules and apps, then modules installed in the system lua, and finally luarocks if installed but we have specific behaviours for this
+
+local config_title
+local function ConfigTitle()
+	if config_ttitle then return end
+	config_title = true
+	display.title"Configuration"
+end
+if not arg[1] then
+	if os.getenv 'SUDO_USER' then
+		ConfigTitle()
+		print"" terminal.erroneous"Not possible using sudo. " terminal.style"Please first use _./elevator_ without sudo, or provide the command arguments that require sudo use such as _./elevator start web_.\n"
+		os.exit()
+	end
+
+	result,error = pcall(dofile,"data/configuration/Host.lua")
+	if error and not string.find(error,"No such file") then
+		ConfigTitle()
+		print"" terminal.erroneous"Can't read data/configuration/Host.lua:" terminal.style(error) print""
+		os.exit()
+	end
+	node = node or {}
+	if node.luarocks ~=false and luarocks and not string.find(package.path,"luarocks") then
+		node.lua = node.lua or {}
+		luarocks = io.popen("luarocks --lua-version=5.1 path"):read("*a")
+		local package_path = string.match(luarocks,"LUA_PATH='([^']+)")
+		local package_cpath = string.match(luarocks,"LUA_CPATH='([^']+)")
+		-- under sudo luarocks --lua-version=5.1 does not return anything -- TODO: check for sudo?
+		-- FIXME: these include the original paths, need to iterate and make sure we don't aldready have them, thus appending and saving only the luarocks values
+		elevator.package_path = ""
+		elevator.package_cpath = ""
+		for path in string.gmatch(package_path,"([^;]+)") do
+			if not string.find(package.path,path,1,true) then elevator.package_path = path..";"..elevator.package_path end
+		end
+		for path in string.gmatch(package_cpath,"([^;]+)") do
+			if not string.find(package.cpath,path,1,true) then elevator.package_cpath = path..";"..elevator.package_cpath end
+		end
+		elevator.package_path = string.sub(elevator.package_path,1,-2)
+		elevator.package_cpath = string.sub(elevator.package_cpath,1,-2)
+		package.path = elevator.package_path..";"..package.path
+		package.cpath = elevator.package_cpath..";"..package.cpath
+	elseif node.lua and node.lua.path then
+		package.path = node.lua.path..";"..package.path
+		package.cpath = node.lua.cpath..";"..package.cpath
+	end
+	-- only check modules on use without args
+	checkmodules"applications"
+	checkmodules"core/applications"
+	checkmodules"core/moonstalk"
+	checkmodules"sites"
+	checkmodules("clerk",false)
+	checkmodules("elevator",false)
+end
+
+if install[1] then
+	-- the following routine reuses the display and cursor does not necessarily move to a new line with each command
+	ConfigTitle()
+	local homebrew = os.execute"which brew > /dev/null" ==0
+	local installing
+	local status_lines,info_lines = 0,0
+	local function status()
+		if status_lines >0 then terminal.up(status_lines) terminal.overwrite() end
+		local status = "  "
+		for i,module in ipairs(install) do
+			if not installing then
+				status = status ..format.dim"> "..format.yellow(module.package) .."   "
+			elseif module.package == installing then
+				status = status .. format.yellow("> "..module.package) .."   "
+			elseif install[module.name] ==true then
+				status = status .. format.dim("> "..module.package) .."   "
+			else
+				status = status .." "..module.package..install[module.name] .." "
+			end
+		end
+		status_lines = terminal.print(status) +1 print""
+	end
+	local continue = ""; if not install['socket.unix'] then continue = ", _C_ontinue to ignore" end -- acts as a flag to determine if we're already installed -- TODO: check for Host.lua instead
+	if luarocks then
+		terminal.style("*The following module"..en_plural(#install," is","s are").." required*. Press _return_ to install with Luarocks, type _Q_uit to exit and perform manually"..continue..", or _module-name_ for a list of files in which it is required.") print""
+	else
+		local install = "install the Luarocks package manager,"
+		if homebrew then install = "_brew install luarocks_" end
+		terminal.style("*The following module"..en_plural(#install," is","s are").." required*. If you "..install.." I can then install these for you. Type _return_ to exit"..continue..". Type _module-name_ for a list of files in which it is required.") print""
+	end
+	status()
+	terminal.output"> "
+	answer = io.read()
+	while answer do
+		for i=1,(info_lines or 0) do terminal.up(1) terminal.overwrite() end info_lines=0
+		answer = string.lower(answer)
+		-- TODO: i/gnore save module name and skip
+		if answer =="q" or answer =="quit" or answer=="exit" or (answer=="" and not luarocks) then
+			os.exit(1)
+		elseif answer =="c" or answer =="continue" then
+			break
+		elseif modules[answer] then
+			terminal.up(1) terminal.overwrite(format.dim"> "..format.yellow(answer).." is required in:\n"); info_lines=info_lines+1
+			for _,file in ipairs(modules[answer].files) do terminal.yellow("  > ") print(file); info_lines=info_lines+1 end
+			terminal.output"> "
+		elseif answer =="" or answer =="y" or answer =="yes" then
+			terminal.up(1) terminal.overwrite() terminal.yellow"Installing…" terminal.hide_cursor()
+			local failed = {}
+			for i,module in ipairs(install) do
+				installing = module.package
+				status()
+				local installed
+				-- TODO: use module.manager
+				if homebrew then
+					installed = os.execute("luarocks --lua-version=5.1 --lua-dir=$(brew --prefix)/opt/lua@5.1 install "..(module.url or module.package).." >/dev/null 2>&1")
+				else
+					installed = os.execute("luarocks --lua-version=5.1 install "..(module.package or module.url).." >/dev/null 2>&1")
+				end
+				if installed ==0 then
+					install[module.name] = format.green" ✓"
+				else
+					install[module.name] = format.erroneous" ✗"
+					table.insert(failed,module.package) failed[module.package]=true
+				end
+			end
+			installing = "" status() install = failed
+			terminal.overwrite() terminal.show_cursor()
+			if #install >0 then
+				info_lines=info_lines+1 terminal.style"!Some modules failed to install!, please check their names and try installing with LuaRocks yourself."
+				return
+			else
+				break
+			end
+		else
+			terminal.up(1) terminal.overwrite("> ".. format.erroneous(answer) .." is an unknown module, or already installed.\n> "); info_lines=info_lines+1
+		end
+		answer = io.read()
+	end
+end
+end
+
+-- now that modules have been discovered and installed we can load code that uses require, such as applications
+
+
+-- # shared moonstalk config
+
+os.execute(" > temporary/elevator.log") -- reset
+moonstalk.Initialise{server="elevator", ready=false, log="temporary/elevator.log", logging=4}
+
+if elevator.package_path then
+	if node.lua ==nil and node.luarocks~=false then
+		ConfigTitle()
+		print"Luarocks is not configured for use with lua-5.1. I've added its paths to node.path and node.cpath for Moonstalk to use. If you do not wish to use modules from Luarocks then set_node.luarocks=false_.\n"
+	end
+	node.lua = node.lua or {}
+	node.lua.path = elevator.package_path
+	node.lua.cpath = elevator.package_cpath
+	moonstalk.SaveConfig()
+end
+
+if not locales[node.locale] then
+	ConfigTitle()
+	terminal.erroneous"Invalid locale" print": see core/globa/Attributes.lua"
+	os.exit(1)
+end
+Errors()
+
+for _,server in ipairs(node.servers or {}) do
+	if not _G[server] then terminal.red" Cannot activate unknow server " terminal.print(server) os.exit(1) end
+	table.insert(elevator.sequences.status, server)
+	util.ArrayAdd(elevator.sequences.start, server)
+	util.ArrayAdd(elevator.sequences.stop, server)
+	util.ArrayAdd(elevator.sequences.status, server)
+	elevator.servers[server] = elevator.servers[server] or server
+end
+
+
+-- # other core commands
+
+elevator.functions.newsecret = function()
+	if node.secret then
+		-- TODO: prompt for confirmation
+		terminal.output "Assigning new secret"
+		display.error "Existing tokens used for sessions are no longer valid, and those in private addresses may also have been invalidated; you must restart the Teller for the change to take effect." print""
+	end
+	node.secret = util.RandomString(32)
+end
+
+elevator.functions.init = function ()
+	-- # first use
+	node.hostname = string.lower(util.Shell "hostname")
+	node.installed = os.time()
+	-- TODO: interactive setup prompt
+	elevator.functions.newsecret()
+	elevator.functions.autostart() -- TODO: prompt if linux; should really only be installed if not node.d ~=100 but we need to check the install process and ensure the node id gets set before init runs
+end
+
+elevator.functions.autostart = function () -- FIXME: this is no longer working under latest distros
+	if sys.platform == "Linux" then
+		os.execute("cp core/defaults/upstart/*.conf /etc/init/")
+		display.error ("An upstart configuration has been installed to automatically start Moonstalk on this server at boot.",false)
+	end
+end
+
+elevator.functions.incoming = function ()
+--TDOD: this is not currently used
+	local repositories = node.repositories or {}
+	if not util.ArrayContainsValue(node.repositories,".") then table.insert(repositories,1,".") end -- ensure we update the moonstalk root, this will use the repo originally that was cloned from (stored in .hg/hgrc)
+	local changes
+	for _,repository in pairs(repositories) do
+		local count = util.Shell("hg incoming --cwd "..repository..'|egrep ^change|wc -l',"*a")
+		if result then
+			print(count..' update'..en_plural(#count,"","s")..' for '.. (string.match(repository,"/(.*)") or "moonstalk"))
+			-- TDOD: check for and flag critical updates
+		end
+	end
+
+end
+
+elevator.functions.update = function ()
+	local repositories = node.repositories or {}
+	if not util.ArrayContainsValue(node.repositories,".") then table.insert(repositories,1,".") end -- ensure we update the moonstalk root, this will use the repo originally that was cloned from (stored in .hg/hgrc)
+	local changes
+	for _,repository in pairs(repositories) do
+		print("Checking repositor"..en_plural(#repositories,"y","ies").."  : ".. (string.match(repository,"/(.*)") or "moonstalk"))
+		local result = util.Shell("hg pull --noninteractive --cwd "..repository,"*a")
+		local update
+		if string.find(result,"no changes") then
+			update = false
+		elseif string.find(result,"changesets") then
+			update = true
+			changes = true
+		end
+		if update==nil then
+			os.execute("cd "..moonstalk.root)
+			display.error ("Repository updates aborted: "..result) print ""
+			return
+		elseif update then
+			result = util.Shell("hg update --clean --noninteractive --cwd "..repository,"*a") -- TODO: if id=100 then don't use clean if there are local changes without a warning or additional command e.g. "clean"
+			if not string.find(result,"updated") then display.error(result) end
+		end
+		print ""
+	end
+	if changes then
+		terminal.yellow"Updates applied" print". Restart the services (scribes, teller, or all) to use the updated versions."
+
+		-- TODO: we don't currently support auto-restart
+		--[[
+		run.restart = true
+		run.scribe = true -- we don't currently restart anything else -- TODO: use deployment flags or notes to indicate when a web or teller restart is required -- TODO: support in-process reloading of apps/sites in the teller and scribes
+		run.ifrunning = true
+		--]]
+		run.restart = nil
+		run.start = nil
+	else
+		terminal.yellow"No updates available" print"."
+	end
+end
+
+elevator.functions.appcheck = function ()
+	local updated_appcheck = {}
+	local apps_added = {}
+	for name in pairs(moonstalk.applications) do
+		if not util.ArrayContainsValue(node.appcheck,name) then
+			table.insert(apps_added,name)
+		end
+		table.insert(updated_appcheck,name)
+	end
+	local apps_removed = {}
+	for _,name in pairs(node.appcheck) do
+		if not moonstalk.applications[name] then table.insert(apps_removed,name) end
+	end
+	if #apps_added>0 then
+		table.insert(elevator.status, format.yellow("Application"..en_plural(#apps_added).."  added and enabled").. ": "..table.concat(apps_added,", "))
+	end
+	if #apps_removed>0 then
+		table.insert(elevator.status, format.yellow("Application"..en_plural(#apps_removed).." removed").. ": "..table.concat(apps_removed,", "))
+	end
+	if #apps_removed>0 or #apps_added>0 then table.insert(elevator.status,"\n") end
+	node.appcheck = updated_appcheck
+end
+
+elevator.functions.rotatelog = function ()
+	io.popen("mv -f temporary/moonstalk.log temporary/moonstalk-".. os.date("%Y%b%d-%H%M") ..".log 2>&1") --TODO: improve
+end
+
+elevator.functions.host = function()
+	if not run.captures.host then terminal.style "!Invalid argument!: host requires a name or path." return end
+	local path = run.captures.host
+	if not string.find(path,"/",1,true) then
+		host = path
+		path = "hosts/"..path
+	else
+		host =  string.match(path,"/(.*)$")
+	end
+	--local host = include(path.."data/configuration/Host.lua")
+	util.Shell("mkdir -p "..path)
+	-- TODO: create symlinks, create Host.lua with host=host; change dir, launch elevator from new host dir with existing arguments? if we do this must run and exit before the title is displayed
+end
+
+
+-- ## main program
+
+-- run application elevator extensions to initialise them for this environment
+local failed
+for name,bundle in pairs(moonstalk.applications) do
+	if bundle.files["elevator.lua"] then
+		local result,err = pcall(dofile,bundle.path.."/elevator.lua")
+		if err then failed=true; moonstalk.BundleError(moonstalk, {realm="application",title="Elevator error for "..name.."/elevator.lua",detail=err,class="lua"}) end
+	end
+end
+Errors()
+if failed then return end
+
+
+-- # parse commands from args
+local capture
+for _,command in ipairs(arg) do
+	if capture then
+		run.captures[command] = command
+		capture = nil
+	elseif elevator.servers[command] then
+		run[elevator.servers[command]] = true
+		run.servers = true
+	elseif elevator.actions[command] then
+		run[elevator.actions[command]] = true
+		run.action = true
+	elseif elevator.commands[command] then
+		run[elevator.commands[command]] = true
+		run.commands = true
+		if elevator.captures[command] then
+			capture = command
+			run.captures = run.captures or {}
+		end
+	elseif elevator.flags[command] then
+		run[command] = true -- sets a value
+	elseif string.find(command,"=",1,true) then
+		-- NOTE: table assignments must escape strings, spaces and commas to protect from the shell
+		local key,value = string.match(command,"(.-)=(.*)")
+		if value =="" then
+			value = "nil"
+		elseif not string.find(value,[["]],1,true) and not string.find(command,"{",1,true) and not tonumber(value) then -- quote unquoted strings only, as shell does not preserve them
+			value = [["]]..value..[["]]
+		end
+		elevator.config.prior[key] = node[key] -- preserve old values, notably important for managing scribe instances i.e. killing ones that are no longer needed when the number is reduced
+		loadstring("node."..key.."="..value)() -- perform assignment
+		-- node file is updated later
+	else
+		run.unknown = command
+	end
+end
+
+
+-- # set defaults
+
+node.provider = node.provider or {domain="moonstalk.org",name="Moonstalk"}
+node.roles = node.roles or {}
+if not node.roles[1] then node.roles[1] = "default" end
+node.servers = node.servers or {}
+node.scribe = node.scribe or {}
+if not node.scribe.server then
+	if util.Shell"which openresty" then
+		node.scribe.server = 'openresty'
+		util.ArrayAdd(node.servers,node.scribe.server)
+	--elseif util.Shell"which lighttpd" then
+	--	node.scribe.server = 'lighttpd'
+	else
+		display.error("No supported web server is installed.\n",false,'red')
+		return
+	end
+end
+
+if not node.databases.default.system then
+	if util.Shell"which tarantool" then -- TODO: this mechanism needs to be in tarantool/elevator
+		node.databases.default = {system="tarantool"}
+		util.ArrayAdd(node.servers,node.databases.default.system)
+	else
+		node.databases.default = {system="databin"}
+	end
+end
+
+node.applications = node.applications or {} -- TODO: some sensible defaults
+node.appcheck = node.appcheck or {} -- FIXME: store in temporary as should not be bundled with node
+node.scribe.instances = node.scribe.instances or sys.processors *2 -- TODO: not if dev mode (not logging) selected
+if node.scribe.instances > 99 then
+	node.scribe.instances = 99
+	display.error("Warning: maximum instances per node is 99\n",false,'yellow')
+elseif node.scribe.instances < 1 then
+	node.scribe.instances = 1
+	display.error("Warning: instances cannot be less than 1\n",false,'yellow')
+end
+if elevator.config.instances and elevator.config.instances ~= node.scribe.instances then
+ 	if node.webserver == "lighttpd" and not run.web and not run.scribe then
+		display.error("You've changed the instances, but you must also restart the web and pages servers.\n",false,'yellow')
+	elseif node.webserver == "openresty" and not run.web then
+		display.error("You've changed the instances, but you must also restart the web server.\n",false,'yellow')
+	end
+end
+
+-- WARNING: on Ubuntu this may be auto-run on startup, where os.getenv does not appear to have any environment on 10.04; we therefore assume a default of rootuser if no value is available for user
+elevator.config.user = os.getenv 'USER'
+elevator.config.sudouser = os.getenv 'SUDO_USER'
+-- are we running as root? required for some commands
+if elevator.config.sudouser or elevator.config.user=='root' or not elevator.config.user then elevator.config.rootuser=true end
+-- who's the user to chroot to, if not root
+elevator.config.user = node.user or elevator.config.sudouser if elevator.config.user=='root' then elevator.config.user=nil end
+
+
+-- # conditional functions and defaults
+
+elevator.functions.web = function ()
+	return elevator.functions[node.scribe.server]()
+end
+elevator.functions.database = function ()
+	return elevator.functions[node.database.default]()
+end
+
+if not node.installed then run.init = true end
+if run.kill then
+	run.stop = true -- not all server function distinguish
+end
+if (run.start or run.restart) and run.all then
+	run.rotatelog = true
+end
+if run.restart then
+	run.stop = true
+	run.start = true
+	if not run.servers then
+		if node.scribe.server=="lighttpd" then
+			-- restart defaults to scribes only
+			run.scribe = true
+		else -- i.e. openresty
+			-- restart defaults to web only
+			run.web = true
+		end
+		run.servers = true
+	end
+end
+if not run.servers and not run.commands and not run.action then
+	run.status = true
+	run.action = true
+end
+if run.action and (run.all or not run.servers) then
+	for _,server in ipairs(node.servers) do run[server] = true end
+	run.servers = true
+end
+
+
+-- # post update integrity and migration
+
+display.title()
+local version = elevator.deployment.version
+if node.version ~= elevator.deployment.version then
+	-- upgraded
+	version = format.green(elevator.deployment.version)..format.underscore -- it's changed
+	if elevator.deployment.upgrader then
+		-- the update command doesn't restart the servers, therefore this is the subsequent invocation of ./elevator restart
+		-- TODO: interactive prompt to warn user about running potentially unverified code -- TODO: implement signing and DNSec
+		display.title"Updating" print""
+		elevator.deployment.Upgrader()
+	end
+end
+
+
+-- get sites and applications
+elevator.config.appcount = util.CountKeys(moonstalk.applications)
+elevator.config.sitecount = util.CountKeys(moonstalk.GetBundles("sites"))
+
+-- # status
+
+local host = ""
+if node.host and node.id then
+	host = " on node-*"..node.id.."."..node.host.."*"
+elseif node.id then
+	host = " on node-*"..node.id.."*"
+elseif node.host then
+	host = " on *"..node.host.."*"
+elseif run.status and util.Shell "hostname" ~= node.hostname then
+	host = " at ".. format.erroneous(node.hostname)
+else
+	host = " at "..node.hostname
+end
+
+display.title("version "..version..host)
+if run.unknown then
+	terminal.style ("!Invalid argument!: _"..run.unknown.."_\n")
+	terminal.style ("For documentation try: ./_elevator_ _help_ or go to _moonstalk.org_\n\n")
+	os.exit(1)
+end
+if run.start or run.status then
+	terminal.output("                hosting "..elevator.config.sitecount.." site"..en_plural(elevator.config.sitecount).." with ") -- TODO: hilight site count change
+	if node.logging>3 then terminal.yellow("logging="..node.logging) else terminal.output("logging="..node.logging) end
+	print ""
+end
+if not arg[1] and not install[1] then
+	print""
+	for name in pairs(elevator.modules) do table.insert(modules,name) end
+	terminal.print(#modules.." modules deployed: "..table.concat(modules,", "))
+end
+print ""
+
+
+-- run upgrader functions for each app
+if not run.init then
+	local upgraded
+	node.versions = node.versions or {}
+	for name,application in pairs(moonstalk.applications) do
+		node.versions[name] = node.versions[name] or application.version -- first use of application is current version which will prevent upgraders from running
+		if application.upgraders and not moonstalk.applications[name].version then
+			format.red("Cannot upgrade application '"..name.."' as version is not known. Exiting.\r")
+			return
+		elseif application.upgraders then
+			for _,version in ipairs(application.upgraders) do
+				if tonumber(version) > (node.versions[name] or 0) then
+					dofile(application.path.."/upgraders/"..version..".lua")
+					upgraded = true
+				end
+			end
+		end
+		node.versions[name] = moonstalk.applications[name].version
+	end
+	if upgraded then print "\r" end
+end
+node.version = elevator.deployment.version -- required for upgrader introspection therefore cannot be updated beforehand
+
+
+-- save Node changes before running servers
+
+SaveConfig()
+
+-- run commands
+
+local run_sequence
+for action in pairs(elevator.actions) do -- some actions define a function order (start, stop)
+	if run[action] then run_sequence = elevator.sequences[action] end
+end
+if run_sequence then -- run ordered
+	for _,command in ipairs(run_sequence) do
+		if run[command] then
+			local result,err = pcall(elevator.functions[command])
+			if err then display.error("elevator.functions."..command..": "..err) end
+			run[command] = nil
+			print ""
+		end
+	end
+end
+for command,value in pairs(run) do -- run remaining
+	if elevator.functions[command] then
+		local result,err = pcall(elevator.functions[command])
+		if err then display.error("elevator.functions."..command..": "..err) end
+		run[command] = nil
+		print ""
+	end
+end
+
+print""
+
+-- # apps
+
+if run.start or run.status then
+	elevator.status = {}
+	terminal.yellow("Checking applications…")
+	elevator.functions.appcheck()
+	if #elevator.status >0 then table.insert(elevator.status,"\n\n") end
+	terminal.overwrite(table.concat(elevator.status,"\n"))
+	elevator.status = {}
+end
+
+-- run elevator functions for each app
+for _,application in pairs(moonstalk.applications) do
+	if application.Elevator then application.Elevator() end
+end
+
+-- save Node again in case servers have changed
+SaveConfig()
+-- # errors
+
+function display.concaterr(err)
+	if err.class=="lua" then return err.detail end
+	if err.title then return err.title..". "..(err.detail or "") end
+	return err.detail
+end
+
+function display.errorlevel(err)
+	if err.level <=log.levels.Priority then
+		display.error(display.concaterr(err),false,"magenta")
+	elseif err.level <=log.levels.Alert then
+		display.error(display.concaterr(err),false,"yellow")
+	elseif err.level <=log.levels.Notice then
+		display.error(display.concaterr(err),false,"default")
+	-- ignore others
+	end
+end
+
+for _,err in ipairs(moonstalk.errors) do display.errorlevel(err) end
+for id,app in pairs(moonstalk.applications) do
+	for _,err in ipairs(app.errors) do display.errorlevel(err) end
+end
+
+if #elevator.errors > 0 then
+	elevator.exit = 1
+	terminal.print(format.yellow("Notices")..":")
+	for i,error in ipairs(elevator.errors) do
+		terminal.print(format[error.format]("["..i.."] ")..error.message)
+	end
+end
+
+print""
+os.exit(elevator.exit)

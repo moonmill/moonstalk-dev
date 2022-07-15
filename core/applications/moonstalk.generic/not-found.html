@@ -1,0 +1,27 @@
+<? page.status = 404
+page.title = l.notfound_title
+local notfound = page.address or "" ?>
+
+<div class="content">
+<div class="section">
+<h1>?(l.notfound_head)</h1>
+<p>We're sorry, but there's no
+<? if notfound ~= 'front' then ?>page « ?(notfound) » that <? if not request.referrer then ?>you requested<? elseif request.domain==site.domain or util.ParentKeyValue(site.domains,"name",request.domain) then ?>we linked you to<? else ?>you were linked to<? end ?><? else ?>front page<? end ?><? if request.referrer then ?> on this site <nobr>« ?(request.domain) »</nobr><? else ?> here<? end ?>.
+?(l.notfound_body)
+ You could:</p>
+<ul>
+	<? if request.referrer then ?><li>Go back to the <a href="?(request.referrer or 'javascript:history.go(-1)')">previous page</a>.</li>
+	<? end ?>
+<? if notfound ~= 'front' then ?>
+	<li>Check the URL in your browser's address bar for mis-spellings.</li>
+	<li>Go to this site's <a href="/"><b>home page</b></a>.</li>
+	<!-- TODO: show related pages using ajax google search for towords(url) -->
+	<form action="http://www.google.com/search" method="GET"><li>Search the site for: <input name="as_q" type="text" value="?(notfound)"><input type="hidden" name="as_sitesearch" value="?(request.domain)"><input type="submit"><!-- TODO: use ajax so that results appear inline --></li></form>
+<? else ?>
+<li>Reflect upon the meaning of life, the universe, and everything…</li>
+<li>Phone a friend.</li>
+<? end ?>
+</ul>
+
+</div>
+</div>

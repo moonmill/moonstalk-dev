@@ -1,0 +1,19 @@
+<?
+page.canonical = false
+page.title=l.unknown_title
+page.headers['X-Robots-Tag'] = "noindex, noarchive, nofollow"
+?>
+
+<div class="content"><div class="section">
+
+<h1>?(l.unknown_head)</h1>
+<p>
+?(
+macro { l.unknown_body,
+	domain = [[<b>]]..request.domain..[[</b>]],
+	provider = [[<a href="http://]]..node.provider.domain..[[/">]]..node.provider.name..[[</a>]],
+	}
+)
+</p>
+
+</div></div>

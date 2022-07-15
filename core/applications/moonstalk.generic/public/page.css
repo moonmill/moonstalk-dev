@@ -1,0 +1,32 @@
+a:visited { color: #00f; }
+header { color:#CCCCCC; font-size: 0.9em; margin-bottom: 2em; padding-bottom: 3px; border-bottom: 1px solid #d7df27; padding-bottom:4px; display: block; }
+header .tab { font-size: 1.2em; border-left: 1px solid #DDDDDD; background-color: #EEEEEE; padding: 2px 8px 4px 8px;-webkit-border-top-left-radius: 4px;-webkit-border-top-right-radius: 4px;-moz-border-radius-topleft: 4px;-moz-border-radius-topright: 4px;border-top-left-radius: 4px;border-top-right-radius: 4px; margin-right:0px }
+header sup { padding-left:12px; vertical-align:3px; position:relative;top:1px}
+header .tab a {text-decoration: none; }
+header .tab a:hover {text-decoration: underline; }
+fieldset { color: #2b2b2b; font-size: 0.9em; padding-top: 1em; margin-bottom: 0.4em; border: none; border-top: dotted 1px #eeeddd; marging-right: 0;padding-right: 0; padding-left: 10px;}
+legend { color: silver; font-size: 0.9em;}
+label {font-weight: bold; font-size: 1.05em; min-width: 120px; display: inline-block;}
+input {font-size: 1em; margin-bottom: 0.3em}
+textarea { vertical-align: text-top;}
+input.error { background-color: #fff7fd; border-right: 5px solid red; }
+textarea.error { background-color: #fff7fd; border-right: 5px solid red; }
+#message{font-size:1em; background-color:#fff7bc;position:relative;top:-1.8em;padding:0.2em 1em; border-color:#fdff48 #ffe196 #ffe196 #fdff48;border-style:solid;border-width:1px;z-index:500;filter:alpha(opacity=90);-moz-opacity:.90;opacity:.90;display:none;}
+span.error{color:red;background-color:#fff7fd;padding-right:5px;padding-left:5px;}
+body {font-family:Helvetica,Arial,sans-serif;font-weight:300; margin: 2em 6em; text-rendering: optimizeLegibility;}
+header,fieldset legend,h1,h2,h3 {font-family:'Didot','Serif';}
+small {font-weight: normal;}
+body sup{
+	vertical-align: baseline;
+	position: relative;
+	top: -0.5em;
+}
+li.detail {list-style:none}
+li.detail:before {content:"“"}
+li.detail:after {content:"”"}
+#poweredby {margin-top:7em;border-bottom:1px solid #EEEEEE;padding-bottom:1px;font-size:0.7em;text-align:right;color:#CCCCCC}
+
+.input {position: relative;}
+img.validation {top: 0.1em;}
+
+abbr,.price {white-space: nowrap;}

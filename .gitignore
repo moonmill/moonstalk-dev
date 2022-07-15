@@ -1,0 +1,10 @@
+/.*
+!.gitignore
+/_*
+**/_*
+/applications
+/sites
+/hosts
+/temporary
+/data
+/core/bin

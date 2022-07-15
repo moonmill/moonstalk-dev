@@ -1,0 +1,96 @@
+<style type="text/css">
+blockquote {font-size: 0.8em;}
+</style>
+
+<h2>Installed Applications</h2>
+<blockquote>
+<? for _,app in pairs(moonstalk.applications) do
+	write[[<a href="#]] write(app.id) write[[">]] write(app.name) write[[</a><br>]]
+end
+?>
+</blockquote>
+<h2>Installed Functionality</h2>
+<h3>Legend</h3>
+<blockquote>
+<img src="/moonstalk.manager/public/16view.png" align="absmiddle">&nbsp;Page View<br>
+<img src="/moonstalk.manager/public/16controllerview.png" align="absmiddle">&nbsp;Page View with Controller<br>
+<img src="/moonstalk.manager/public/16controller.png" align="absmiddle">&nbsp;Controller<br>
+<img src="/moonstalk.manager/public/16fscribe.png" align="absmiddle">&nbsp;Page Function<br>
+<img src="/moonstalk.manager/public/16database.png" align="absmiddle">&nbsp;Database Table<br>
+<img src="/moonstalk.manager/public/16database.png" align="absmiddle"><i>&nbsp;Database Index</i><br>
+<img src="/moonstalk.manager/public/16fteller.png" align="absmiddle">&nbsp;Database Function<br>
+<img src="/moonstalk.manager/public/16setting.png" align="absmiddle">&nbsp;Application Setting<br>
+<img src="/moonstalk.manager/public/16settings.png" align="absmiddle">&nbsp;Application Data<br>
+</blockquote>
+<div>
+<?
+local handlers = keyed {"curator","collator","editor"}
+local components = keyed (copy(moonstalk.defaults.applications))
+copy(keyed{"applications","name","id","path","autoaddresses"},components)
+for name,app in pairs(moonstalk.applications) do
+	write[[<h3><a name="]] write(app.id) write[[">]] write(name) write[[.]]
+	for _,handler in ipairs(handlers) do
+		if app[handler] then
+			write([[ <sup><small>]]..handler..[[</small></sup>]])
+		end
+	end
+	write[[</h3>]]
+	write [[<blockquote>]]
+	local names = {}
+	local items = {}
+	for name,item in pairs(app) do
+		if name=="database" then
+			for _,name in ipairs(item) do
+				if type(name)=="table" then -- index
+					table.insert(names,name.name)
+					items[name.name] = [[<img src="/moonstalk.manager/public/16database.png" align="absmiddle"><i>&nbsp;]] .. name.name .. [[.</i><br>]]
+				else
+					table.insert(names,name)
+					items[name] = 
+					[[<img src="/moonstalk.manager/public/16database.png" align="absmiddle">&nbsp;]] .. name .. [[.<br>]]
+				end
+			end
+		elseif not handlers[name] and not components[name] then
+			if type(item)=="function" then
+				table.insert(names,name)
+				items[name] = [[<img src="/moonstalk.manager/public/16fscribe.png" align="absmiddle">&nbsp;]] ..name.. [[()<br>]]
+			elseif type(item)=="table" then
+				local mt = getmetatable(item)
+				if mt and mt.__call then
+					table.insert(names,name)
+					items[name] = [[<img src="/moonstalk.manager/public/16fteller.png" align="absmiddle">&nbsp;]] ..name..[[()<br>]]
+				else
+					table.insert(names,name)
+					items[name] = [[<img src="/moonstalk.manager/public/16settings.png" align="absmiddle">&nbsp;]] ..name..[[.<br>]]
+				end
+			else
+				table.insert(names,name)
+				items[name] = [[<img src="/moonstalk.manager/public/16setting.png" align="absmiddle">&nbsp;]] ..name..[[<br>]]
+			end
+		end
+	end
+
+	for name in pairs(app.views) do
+		table.insert(names,name)
+		if app.controllers[name] then
+			items[name] = [[<img src="/moonstalk.manager/public/16controllerview.png" align="absmiddle">&nbsp;]] .. name .. [[<br>]]
+		else
+			items[name] = [[<img src="/moonstalk.manager/public/16view.png" align="absmiddle">&nbsp;]] .. name .. [[<br>]]
+		end
+	end
+	for name in pairs(app.controllers) do
+		if not app.views[name] then
+			table.insert(names,name)
+			items[name] = [[<img src="/moonstalk.manager/public/16controller.png" align="absmiddle">&nbsp;]] .. name .. [[<br>]]
+		end
+	end
+
+	table.sort(names,function (a, b) return a:upper() < b:upper() end)
+	for _,item in ipairs(names) do
+		write(items[item])
+	end
+	if #names==0 then write[[<i>no public functionality</i>]] end
+	write [[</blockquote>]]
+end
+?>
+</div>

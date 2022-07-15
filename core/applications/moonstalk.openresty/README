@@ -1,0 +1,5 @@
+Behaviours:
+- Uses resty.reqargs to enable multipart upload handling; add multipart={max_file_size=10000000, timeout=30000} on an address, and change the defaults in openresty.multipart.
+- It is not possible to use any async or coroutine without also using moonstalk.Wrap to preserve the originating request.
+- It is not possible to use iterative functions such as file:lines at any point, use a blocking C function instead (not recommended for requests, but only in Intialisation functions such as Enabler).
+- With logging=4 (dev mode) any application errors normally only output to webpages will be reported by the runner when attempting to start as well. In logging modes <4 these errors cannot be caught and the pages must be checked instead. This is because Openresty does not initialise it's workers until they receive their first request.
