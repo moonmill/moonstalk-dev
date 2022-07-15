@@ -1,6 +1,6 @@
 -- for the North America code, we add area codes
 -- TODO: add canadian area codes
-{
+return {
 ['93']={"af"},
 ['355']={"al"},
 ['213']={"dz"},
@@ -172,6 +172,8 @@
 ['685']={"ws"},
 ['378']={"sm"},
 ['239']={"st"},
+['381']={"rs"},
+['382']={"me"},
 ['966']={"sa"},
 ['221']={"sn"},
 ['248']={"sc"},

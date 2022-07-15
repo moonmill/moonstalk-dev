@@ -21,7 +21,7 @@ terms = {
 	languages ={}, -- indexed by language code
 	countries ={options={}}, -- index by country_code, options sorted by native name(s); used by tag.Countries
 	nationalities ={options={}},
-	e164 = dofile"e164.lua", -- telephone prefixes, for a string lookup provides either a string ['33']="fr" (if single country result) or an array ['1']={"us","ca"} (where multiple countries share the prefix)
+	e164 = dofile"core/globals/e164.lua", -- telephone prefixes, for a string lookup provides either a string ['33']="fr" (if single country result) or an array ['1']={"us","ca"} (where multiple countries share the prefix)
 }
 terms.countries.ordered=terms.countries.options
 
