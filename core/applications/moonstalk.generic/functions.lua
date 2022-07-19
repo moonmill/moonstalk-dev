@@ -9,8 +9,6 @@ This application provides essential supporting functions and files to the Moonst
 
 -- TODO: refactor signin/out probably move to teller as bundled behaviours and add equiavalents to tarantool, else add teller-generic and tarantool-generic apps
 
-_G.http = _G.http or {}
-
 require "md5"
 require "mime" -- {package="mimetypes"}
 bcrypt = require "bcrypt" -- {url="https://raw.githubusercontent.com/mikejsavage/lua-bcrypt/master/rockspec/bcrypt-2.1-4.rockspec"}
@@ -318,46 +316,49 @@ end
 
 if moonstalk.server =="tarantool" then return end-- FIXME:
 
+_G.http = _G.http or {}
 do if not http.New then
-local httpclient = require "socket.http"
-local ltn12 = require "ltn12"
--- by default these are synchronous blocking functions, and should be replaced with async versions in the async server environments by their Enabler
--- for async use with openresty see moonstalk.openresty/include/server.lua which accepts defer=secs and/or async=true|func
-function http.New(request)
-	-- request = {url="http://host:port/path", method="GET", headers={Name="value"}, timeout=millis, json={…}, content=[[text]], urlencoded={…}}
-	-- method is optional, default is GET or POST with json, body or urlencoded
-	-- response.json is a table if the response content-type is application/json
-	-- returns response,error -- NOTE: always use 'if err' not 'if not response' as the response object may nonetheless be returned with an error such as if it could not be decoded
-	if request.timeout then httpclient.TIMEOUT = request.timeout/1000 else httpclient.TIMEOUT = 1 end
-	request.headers = request.headers or {}
-	if request.urlencoded then
-		request.method ="POST"
-		request.headers['Content-Type'] ="application/x-www-form-urlencoded"
-		request.body =TODO(request.urlencoded) -- TODO: server neutral
-	elseif request.json then
-		request.method = request.method or "POST"
-		request.headers['Content-Type'] ="application/json"
-		request.body =json.encode(request.json)
+	-- must not replace already established interfaces for a specific server environment
+	local httpclient = require "socket.http"
+	local ltn12 = require "ltn12"
+	-- by default these are synchronous blocking functions, and should be replaced with async versions in the async server environments by their Enabler
+	-- for async use with openresty see moonstalk.openresty/include/server.lua which accepts defer=secs and/or async=true|func
+	http.New = http.New or function(request)
+		-- request = {url="http://host:port/path", method="GET", headers={Name="value"}, timeout=millis, json={…}, content=[[text]], urlencoded={…}}
+		-- method is optional, default is GET or POST with json, body or urlencoded
+		-- response.json is a table if the response content-type is application/json
+		-- returns response,error -- NOTE: always use 'if err' not 'if not response' as the response object may nonetheless be returned with an error such as if it could not be decoded
+		if request.timeout then httpclient.TIMEOUT = request.timeout/1000 else httpclient.TIMEOUT = 1 end
+		request.headers = request.headers or {}
+		if request.urlencoded then
+			request.method ="POST"
+			request.headers['Content-Type'] ="application/x-www-form-urlencoded"
+			request.body =TODO(request.urlencoded) -- TODO: server neutral
+		elseif request.json then
+			request.method = request.method or "POST"
+			request.headers['Content-Type'] ="application/json"
+			request.body =json.encode(request.json)
+		end
+		request.method = request.method or "GET"
+		log.Info(request.method.." "..request.url)
+		request.headers.Host = request.headers.Host or string.match(request.url,"^.-//(.-)/")
+		if request.log ~=false then if request.log =="dump" then scribe.Dump(request,"http") else log.Debug(request) end end
+		local sink = {}
+		request.sink = ltn12.sink.table(sink) -- new table for response body
+		local success, code, headers = httpclient.request(request)
+		local response = {status=code, headers=headers, content=table.concat(sink)}
+		request.response = response -- introspection for request object which has been recorded in _G.request.subrequests
+		if not success then log.Alert(response) return nil,code end
+		if string.sub(response.headers['content-type'],1,16) =="application/json" then -- sometimes sent with ; charset=
+			local err
+			response.json,err = json.decode(response.body)
+			if err then response._err = err; log.Alert(response); return nil,"JSON: "..err end
+		end
+		if request.log ~=false then log.Info(response) end
+		return response
 	end
-	request.method = request.method or "GET"
-	log.Info(request.method.." "..request.url)
-	request.headers.Host = request.headers.Host or string.match(request.url,"^.-//(.-)/")
-	if request.log ~=false then if request.log =="dump" then scribe.Dump(request,"http") else log.Debug(request) end end
-	local sink = {}
-	request.sink = ltn12.sink.table(sink) -- new table for response body
-	local success, code, headers = httpclient.request(request)
-	local response = {status=code, headers=headers, content=table.concat(sink)}
-	request.response = response -- introspection for request object which has been recorded in _G.request.subrequests
-	if not success then log.Alert(response) return nil,code end
-	if string.sub(response.headers['content-type'],1,16) =="application/json" then -- sometimes sent with ; charset=
-		local err
-		response.json,err = json.decode(response.body)
-		if err then response._err = err; log.Alert(response); return nil,"JSON: "..err end
-	end
-	if request.log ~=false then log.Info(response) end
-	return response
+	http.Request = http.Request or http.New -- no differentiation as deferred and async are not currently supported -- TODO: use task for deferred and call async regardless even though blocking
 end
-http.Request = http.New -- no differentiation as deferred and async are not currently supported -- TODO: use task for deferred and call async regardless even though blocking
 function http.Save(request,path)
 	-- request can be a complete request object or URL
 	-- the response will be saved to a file at the given path, replacing any existing, and retuning true
@@ -376,4 +377,4 @@ function http.SaveResponse(request)
 	if err then err = "Cannot save request from "..request.url.." to "..request.saveas.." because of error: "..err; log.Alert(err); return false,err end
 	return true
 end
-end end
+end
