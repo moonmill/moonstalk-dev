@@ -75,7 +75,7 @@ elevator.functions.openresty = function ()
 		local installdir = "core/applications/moonstalk.openresty"
 		local installdir = util.Shell("readlink "..installdir) or (moonstalk.root.."/core/applications/moonstalk.openresty") -- nginx will only follow one symlink, thus we must resolve the actual path in case the app is a symlink
 		util.Shell("mkdir temporary/nginx")
-		util.Shell("ln -s "..installdir.."/defaults "..moonstalk.root.."/temporary/nginx/defaults")
+		util.Shell("ln -s "..installdir.."/defaults "..moonstalk.root.."/temporary/nginx/")
 		util.Shell("ln -s "..moonstalk.root.."/data/configuration temporary/nginx/data")
 	end
 
