@@ -14,9 +14,22 @@ msgpack.NULL = "\xc0" -- FIXME: ???
 
 tarantool.client = require"moonstalk.tarantool/client" -- WAS: package="lua-resty-tarantool"
 local tarantool_client = tarantool.client
+
+function tarantool.Connect(interface)
+	if request[interface] then request[interface]:close() end
+	local result,err
+	request[interface],err = ngx.socket.tcp()
+	if err then return moonstalk.Error{tarantool, level="Priority", title="socket error: "..err} end
+	interface.connected = now
+	-- request[interface]:settimeout(1000) -- HACK: this fixed the frequent corrupted msgpack transactions, but is only used for the initial connection on server startup
+	result,err = tarantool_client.connect(interface)
+	if not result then return moonstalk.Error{tarantool, level="Notice", title="connection failure with "..interface.role, detail=err} end
+	return true
+end
+
 if moonstalk.initialise.coroutines ~=false then
-	 -- for async coroutine servers network calls must preserve the global environment
-	 local function TarantoolServerMethod(interface,method,is_retry,...)
+	-- for async coroutine servers network calls must preserve the global environment
+	local function TarantoolServerMethod(interface,method,is_retry,...)
 		-- generic handler for running application server methods is wrapped by moonstalk.Resune, with an upvalue for the method function itself
 		-- unfortunately we have to do this with every query, even when sequential in the same request, as apparently reusing the socket is not possible -- OPTIMIZE: storing the server connection object in request[interface] = server is not reusable however the references may have been incorrect when original tested, for now we recreate the socket
 		local server,err = ngx.socket.tcp()
@@ -25,6 +38,7 @@ if moonstalk.initialise.coroutines ~=false then
 		request[interface] = server -- FIXME: remove this in the client
 		if server:getreusedtimes() ==0 then -- connection is freshly established, the server probably restarted, else the connection has been in the pool a while
 			-- technically if we called tarantool.connect each time teh handshake and authentication woudl be transparently handled for us, albeit at teh cost of invoking serveral additional functions thus we've hoisted that functionality inline here
+			-- request[interface]:settimeout(1000) -- HACK: this fixed the frequent corrupted msgpack transactions, but is only used for the initial connection on server startup
 			result,err = tarantool_client.handshake(interface)
 			if not result then return nil,err end
 			log.Info("[re]connected to Tarantool instance '"..interface.role.."'") -- TODO: indicate reconnection
@@ -167,16 +181,6 @@ end
 -- WARNING: procedures cannot return an array, and should instead use {result=array}
 -- TODO: typically workload should be evenly distributed amongst clients thus even if one is not invoked for 30 mins it can only have updates * clients in its queue thus is not going to be an issue unless some workers are very slow or there are hundreds; in this case we could use a moonstalk.databases.cache_purge = mins value (default 5 mins?) with timer in each worker that recreates itself once done to repeat, this calls a dummy db.CachePurge() procedure that results in any outstanding cached itsems being returned; which ensures that when a real client call is made it's not slowed down by an unreasonably large cache payload; the tarantool server would also use cache_purge to remove old items from its queue instead of tracking subscriptions (a broken connection that is reestablished >cache_purge would be an issue, so in this scenario the cache would have to be purged and reintialised in the client just as at startup)
 
-function tarantool.Connect(interface)
-	if request[interface] then request[interface]:close() end
-	local result,err
-	request[interface],err = ngx.socket.tcp()
-	if err then return moonstalk.Error{tarantool, level="Priority", title="socket error: "..err} end
-	interface.connected = now
-	result,err = tarantool_client.connect(interface)
-	if not result then return moonstalk.Error{tarantool, level="Notice", title="connection failure with "..interface.role, detail=err} end
-	return true
-end
 
 --[=[
 function tarantool.Run(server,name,...)

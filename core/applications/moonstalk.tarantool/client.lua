@@ -347,6 +347,7 @@ local function tnt_request(self, header, body)
   end
   -- Receive the response, only the size.
   local size, err = sock:receive(iproto.head_body_len_size)
+-- log.Alert(string.tohex(size)) -- FIXME: the 9th request is getting corrupted??!
   if not size then
     sock:close()
     return nil, format('Failed to get response size: %s.', err)
@@ -356,13 +357,17 @@ local function tnt_request(self, header, body)
   size = mp.unpack(size)
   -- If if fails then bail out.
   if not size then
-    --  sock:close()
+
+local result = sock:receive("*") -- FIXME:
+log.Alert"bad size"
+log.Alert(string.tohex(result))
+    sock:close()
     return nil, 'Client response has invalid size.'
   end
   -- Extract the message (header and body).
   local header_and_body, err, partial = sock:receive(size)
   if not header_and_body then
-    sock:close()
+        sock:close()
     return nil,  format('Failed to get response header and body: %s.', err)
   end
   -- Deserialize the response. Returns an iterator.
