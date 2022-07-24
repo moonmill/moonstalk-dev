@@ -230,7 +230,7 @@ function _Request()
 			request.query = keyed(split(request.query_string,"+")) -- OPTIMIZE: in-line code, or single combined function
 		end
 	else
-		request.query = {}
+		request.query = EMPTY_TABLE
 	end
 	if request.headers.cookie then
 		setmetatable(request.cookies, CookieReader) -- DEPRECATE: and simply use scribe.Cookie"name" which openresty can replace
