@@ -94,7 +94,7 @@ function Request(request) -- request can be built in the server, typically by ca
 
 	-- # Scribe globals
 	_G.user = false
-	_G.page = { state=0, status=200, type="html", data={}, headers={}, javascript={},  sections={content={"",length=1}, output="content"} } -- TODO: don't create data? -- NOTE: APIs and anything serving other content types must explictly declare the type
+	_G.page = { state=0, status=200, type="html", data={}, headers={}, sections={content={"",length=1}, output="content"} } -- TODO: don't create data? -- NOTE: APIs and anything serving other content types must explictly declare the type
 	_G.output = page.sections.content
 	local page = page
 
