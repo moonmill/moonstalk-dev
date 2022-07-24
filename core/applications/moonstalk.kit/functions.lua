@@ -1321,6 +1321,7 @@ function Editor ()
 	table_insert(script, '\n')
 
 	table_insert(script, [[var page=]])
+	page.javascript = page.javascript or {}
 	local page_js = page.javascript
 	page_js.flags = {}
 	if _G.page._validation then
