@@ -1310,33 +1310,38 @@ function Editor ()
 	-- # JavaScript Environment
 	-- TODO: this should be suppressed for AJAX requests (using a POST param or address.ajax=true)
 
-	table_insert(script, [[var client=]])
-	local client_js = {
-		-- ip = request.client.ip,
+	table_insert(script, "var client=")
+	table_insert(script, json.encode{
 		locale = request.client.locale,
 		languages = request.client.languages,
-		session = request.client.session~=nil, -- not whole table just true or false
-	}
-	table_insert(script, json.encode(client_js))
+	})
 	table_insert(script, '\n')
 
-	table_insert(script, [[var page=]])
-	page.javascript = page.javascript or {}
-	local page_js = page.javascript
-	page_js.flags = {}
-	if _G.page._validation then
-		local jsflags=page_js.flags; local copyfields=util.copyfields
-		for _,validation in ipairs(_G.page._validation) do
-			local jsval =  copyfields(validation,nil,"1","validate","arg","optional","default","error","valid") -- we don't copy validated_class as we generally want the status to be updated from default
-			if jsvalidate[validation.validate] then copy(jsvalidate[validation.validate],jsval,true,false) end
-			jsflags[validation[1]] = jsval
-		end
+	if user and not user.javascript then -- user.javascript = {}; can be declared in a template if wanted on all pages
+		table_insert(script, "var user={}\n") -- OPTIMIZE: use.length counter and don't call table_insert
+	elseif user then
+		table_insert(script, "var user=")
+		table_insert(script, json.encode(user.javascript))
+		table_insert(script, '\n')
 	end
-	page_js.validated = page.validated
-	page_js.focusfield = page.focusfield
-	table_insert(script, json.encode(page_js))
-	table_insert(script, '\n')
 
+	if page.javascript then
+		table_insert(script, "var page=")
+		local page_js = page.javascript
+		page_js.flags = {}
+		if _G.page._validation then
+			local jsflags=page_js.flags; local copyfields=util.copyfields
+			for _,validation in ipairs(_G.page._validation) do
+				local jsval =  copyfields(validation,nil,"1","validate","arg","optional","default","error","valid") -- we don't copy validated_class as we generally want the status to be updated from default
+				if jsvalidate[validation.validate] then copy(jsvalidate[validation.validate],jsval,true,false) end
+				jsflags[validation[1]] = jsval
+			end
+		end
+		page_js.validated = page.validated
+		page_js.focusfield = page.focusfield
+		table_insert(script, json.encode(page_js))
+		table_insert(script, '\n')
+	end
 	-- # Conditional JavaScript
 
 	if page.javascript_loader then
