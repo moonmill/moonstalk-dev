@@ -1189,7 +1189,7 @@ function Sync(path,table)
 end
 
 function FindPID(command)
-	local running = util.Shell("ps -o pid= -o command= -A | grep '\\d*.*"..command.."' | grep -v grep")
+	local running = util.Shell("ps -o pid= -o command= -A | grep '\\d*.*"..command.."' | grep -v -e grep -e elevator")
 	if running then
 		return tonumber(string_match(running,'%d+'))
 	end
@@ -2460,6 +2460,7 @@ function Shell(command,read)
 	local shell = io.popen(command.." 2>&1")
 	local result = shell:read(read or "*l")
 	shell:close()
+	if result =="" then return end
 	return result
 end
 
