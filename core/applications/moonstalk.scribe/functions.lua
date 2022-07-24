@@ -218,7 +218,7 @@ function Request(request) -- request can be built in the server, typically by ca
 	-- end
 
 	if page.cookies then scribe.SetCookies() end
-	if page.modified then
+	if page.modified and not page.locks then
 		page.headers["Last-Modified"] = page.headers["Last-Modified"] or util_HttpDate(page.modified) or util_HttpDate(page.created) -- don't change if already set, otherwise nil if no dates; must disable when logging>4 to prevent webserver sending 304 not-modified
 	end
 	page.headers["Content-Type"] = types.content[page.type] or page.type
