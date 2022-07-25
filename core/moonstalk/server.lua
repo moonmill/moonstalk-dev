@@ -73,7 +73,7 @@ dofile "core/globals/Attributes.lua"
 
 host.servers = keyed(copy(node.servers))
 host.roles = keyed(copy(node.roles or {})) -- allows discovery of local roles, e.g. for database queries, if a table's role, is local it can be queried on the local server, not a remote one
-moonstalk.root = os.getenv"PWD" or util.Shell("PWD") -- we can run with sudo, which does not have the original env variables
+moonstalk.root = util.Shell("pwd") -- we can run with sudo, which does not have the original env variables
 
 -- default environments
 -- NOTE: nested defaults should not be used unless the root key can be safely replaced during ReadBundle
