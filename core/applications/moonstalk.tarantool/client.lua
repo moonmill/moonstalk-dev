@@ -357,7 +357,6 @@ local function tnt_request(self, header, body)
   size = mp.unpack(size)
   -- If if fails then bail out.
   if not size then
-
 local result = sock:receive("*") -- FIXME:
 log.Alert"bad size"
 log.Alert(string.tohex(result))

@@ -7,7 +7,6 @@ _G.cipher = require "openssl.cipher" -- {package="luaossl"}
 _G.mime = require "mime" -- {package="mimetypes"}
 _G.socket = require "socket"
 _G.lfs = require "lfs" -- {package="luafilesystem"}
-_G.uuid = require "lua_uuid"
 
 local string_match = string.match
 local string_gsub = string.gsub
@@ -76,11 +75,14 @@ do
 	-- the most most performant token generation included here is RandomID(), followed by Encrypt(CreateID()) whilst ShortToken is the slowest with even short lengths
 	-- NOTE: the 'hashids' library could be used as a 'ShortEncodeID' but has been considered to be unsuitable for inclusion due to the potential to missuse it with any sensistive record.id; if used solely with CreateID and its own salt (not node.secret) it may be more acceptable
 
-	function Token(length)
-		-- much faster than ShortToken but without the custom chars; max length is 32
-		local token = string.gsub(uuid(),"%-","")
-		if length and length~=32 then return string.sub(token,1,length) end
-		return token
+	do
+		local uuid = require "lua_uuid" -- {package=false}; optional
+		function Token(length)
+			-- much faster than ShortToken but without the custom chars; max length is 32
+			local token = string.gsub(uuid(),"%-","")
+			if length and length~=32 then return string.sub(token,1,length) end
+			return token
+		end
 	end
 
 	local iv = string.sub(node.secret,-16)

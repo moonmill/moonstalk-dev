@@ -275,6 +275,7 @@ end
 
 local luarocks = os.execute("which luarocks > /dev/null") ==0
 -- we use moonstalk modules and apps, then modules installed in the system lua, and finally luarocks if installed but we have specific behaviours for this
+-- TODO: check if luarocks --version is > 3.8
 
 local config_title
 local function ConfigTitle()

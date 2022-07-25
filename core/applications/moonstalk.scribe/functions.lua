@@ -219,7 +219,7 @@ function Request(request) -- request can be built in the server, typically by ca
 
 	if page.cookies then scribe.SetCookies() end
 	if page.modified and not page.locks then
-		page.headers["Last-Modified"] = page.headers["Last-Modified"] or util_HttpDate(page.modified) or util_HttpDate(page.created) -- don't change if already set, otherwise nil if no dates; must disable when logging>4 to prevent webserver sending 304 not-modified
+		page.headers["Last-Modified"] = page.headers["Last-Modified"] or util_HttpDate(page.modified or page.created) -- don't change if already set, otherwise nil if no dates; must disable when logging>4 to prevent webserver sending 304 not-modified
 	end
 	page.headers["Content-Type"] = types.content[page.type] or page.type
 	page.headers["Content-Language"] = page.language or site.language
@@ -729,7 +729,7 @@ function Sites()
 	site.name = "Moonstalk"
 	site.id = "localhost"
 	site.provider = false
-	if not string.find(node.hostname,".",1,true) then moonstalk.BundleError(scribe,{title="Unqualified hostname",detail="You must set node.hostname with a fully qualified domain name to enable remote access such as for use with the Manager interface. ./runner hostname=server.example.com"}) end
+	if not string.find(node.hostname,".",1,true) then moonstalk.BundleError(scribe,{title="Unqualified hostname",detail="You must set node.hostname with a fully qualified domain name to enable remote access such as for use with the Manager interface. ./elevator hostname=server.example.com"}) end
 	site.domain = node.hostname or "localhost"
 	site.domains = {{name=node.hostname,redirect=false},{name="localhost",redirect=false}}
 	site.locale = node.locale
