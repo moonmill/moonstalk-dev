@@ -9,7 +9,9 @@ local string_match = string.match
 local string_gmatch = string.gmatch
 local string_find = string.find
 local string_sub = string.sub
+local string_gsub = string.gsub
 local table_concat = table.concat
+local ipairs = ipairs
 
 _G.captcha = _G.captcha or {} -- namespace
 
@@ -1279,7 +1281,7 @@ function reader(data,view)
 			end
 		end
 		if count >0 then
-			data = string.gsub(data, [[="([^%]/].-)"]], change)
+			data = string.sub(data, [[="([^%]/].-)"]], change)
 			log.Info("  changed base of "..count.." relative paths")
 		end
 	end
@@ -1317,12 +1319,13 @@ function Editor ()
 	})
 	table_insert(script, '\n')
 
-	if user and not user.javascript then -- user.javascript = {}; can be declared in a template if wanted on all pages
-		table_insert(script, "var user={}\n") -- OPTIMIZE: use.length counter and don't call table_insert
-	elseif user then
+	if user then
 		table_insert(script, "var user=")
 		table_insert(script, json.encode(user.javascript))
 		table_insert(script, '\n')
+	else
+		-- we always declare this to avoid the need to use if(window.user) due to otherwise being undefined
+		table_insert(script, "var user=null\n")
 	end
 
 	if page.javascript then
@@ -1384,7 +1387,7 @@ function Editor ()
 	end
 	if script[2] then
 		table_insert(script, '\n</script></head>')
-		_G.output = string.gsub(_G.output, [[</head>]], table.concat(script), 1)
+		_G.output = string_gsub(_G.output, [[</head>]], table.concat(script), 1)
 	end
 
 	-- # Head
@@ -1398,7 +1401,7 @@ function Editor ()
 			table_insert(head,"\n")
 		end
 		table_insert(head,"</head>")
-		_G.output = string.gsub(_G.output, [[</head>]], table.concat(head), 1)
+		_G.output = string_gsub(_G.output, [[</head>]], table_concat(head), 1)
 	end
 
 end

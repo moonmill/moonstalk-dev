@@ -1059,7 +1059,7 @@ moonstalk.AddLoader("lua",moonstalk.StripLogging,moonstalk)
 moonstalk.ignore_DirectoryFlattenedFiles = {["sites"]=true,["public"]=true,["assets"]=true,["static"]=true,["source"]=true,["development"]=true,["dev"]=true}
 -- the following is replaced by utilities-dependent and thus not actually used anywhere; in openresty this non-lfs version gets interrupted due to the use of :lines
 function moonstalk.DirectoryFlattenedFiles(path,ignore,cd,depth)
-	-- returns a table (of filenames) with all flattened files in the given directory path; use with ipairs or table[filename] lookup; each file value is a table having both a file key and a path key (from moonstalk root) plus a type key if the file has an extension; do not use pairs to iterate; follows symbolic links
+	-- returns a table (of filenames) with all flattened files in the given directory path; use with pairs or table[filename] lookup; each file value is a table having both a file key and a path key (from moonstalk root) plus a type key if the file has an extension; do not use pairs to iterate; follows symbolic links
 	-- ignore is an additional table of keyed names that will not be traversed in the root
 	-- recursive only to the third level e.g. myapp/folder/folder/file therefore application and site bundles cannot place views and controllers any deeper than a second folder, or override a view/controller in another application beyond the first folder e.g. myapp/otherapp/folder/override.file
 	-- cd is a path to be prepended to the path (an internal param and not typically used), the aggregate representation of this is the .file value, thus root item .name==.file

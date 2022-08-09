@@ -88,8 +88,8 @@ elevator.functions.openresty = function ()
 	data = string.gsub(data, "worker_processes auto", "worker_processes "..node.scribe.instances)
 	local overrides,err = io.open("data/configuration/nginx.conf")
 	if overrides then
-		overrides:read("*a"); overrides:close()
-		string.gsub(data, "\nhttp", overrides.."\nhttp")
+		data = string.gsub(data, "http {\n", "http {\n"..overrides:read("*a"))
+		overrides:close()
 	end
 
 	-- prepare the directives to insert into http

@@ -45,7 +45,6 @@ moonstalk_Kit.Initialise = function(){
 			});
 		},
 		scrollTo: function(elem,mobile) {
-			if (mobile && page.mobile ==false) {return}
 			$(elem).scrollTop($(elem).scrollTop() - $(elem).offset().top);
 			return this;
 		},

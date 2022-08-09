@@ -167,7 +167,7 @@ function SetSession(session,err)
 	request.client = client
 	-- NOTE: the only values that currently needs persisting
 	client.ip = serverclient.ip
-	client.languages = EMPTY_TABLE
+	client.languages = EMPTY_TABLE -- FIXME:
 		-- the follow prefer user values (i.e. persistent settings) but preserve client values (i.e. browser dervived values)
 	-- TODO: support per-domain defaults instead of per-site (e.g. *.co.uk or uk.* locale=uk)
 	client.language = user.language or client.language

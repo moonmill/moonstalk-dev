@@ -81,12 +81,11 @@ function Request(request) -- request can be built in the server, typically by ca
 
 	-- # Moonstalk globals
 	-- no locale is required until a site is available
-	_G.site = {}
 	_G.request = request
 	request.identifier = scribe.hits
 	log.Info() request.identifier = util_Pad(scribe.hits,3)
 	request.rooturl = request.scheme.."://"..request.domain.."/" -- ?(request.rooturl)my/path
-	local client = request.client -- must be set by the server with ip; an asbtract representation of the merged conditions of request and user (if any) that may change from request to request, whereas a user should be mostly constant, and bound to a client via a session
+	-- NOTE: request.client must be set by the server with ip; an asbtract representation of the merged conditions of request and user (if any) that may change from request to request, whereas a user should be mostly constant, and bound to a client via a session
 
 	log.Info() request.cpuclock = os.clock()
 	request[string_lower(request.method)] = true
@@ -145,7 +144,7 @@ function Request(request) -- request can be built in the server, typically by ca
 	-- # authentication
 	-- this depends upon page.locks which may prevent it, however if a collator wants to perform it earlier it may
 	page.state = 4
-	if page.locks ~=false and (request.client.token or request.form.action =="Signin") and (page.Authenticator or site.Authenticator) then (page.Authenticator or site.Authenticator)() end -- Authenticator can be set to false in both cases but if page.Authenticator is given site set to false will be ignored; Authenticators fetch the user identified by the request.client.token and populates the _G.user table generally with at least nick and keychain; can be disabled with address.locks=false if the page uses it's own authentication mechanism such as not employing the client.token
+	if page.locks ~=false and (request.client.id or request.form.action =="Signin") and (page.Authenticator or site.Authenticator) then (page.Authenticator or site.Authenticator)() end -- Authenticator can be set to false in both cases but if page.Authenticator is given site set to false will be ignored; Authenticators fetch the user identified by the request.client.token and populates the _G.user table generally with at least nick and keychain; can be disabled with address.locks=false if the page uses it's own authentication mechanism such as not employing the request.client.token
 	-- now that we may have a user, we can validate against page if locked
 	if page.locks then
 		page.nocache = true -- nothing with authentication restrictions should be cached; this is currently implemented by Kit
@@ -201,6 +200,13 @@ function Request(request) -- request can be built in the server, typically by ca
 
 
 	-- # Post-processing
+	if page.modified and not page.locks then -- POST invalidates cached pages thus last-modified is ignored
+		page.headers["Last-Modified"] = page.headers["Last-Modified"] or util_HttpDate(page.modified or page.created) -- don't change if already set, otherwise nil if no dates; must disable when logging>4 to prevent webserver sending 304 not-modified
+	end
+	page.headers["Content-Type"] = types.content[page.type] or page.type
+	page.headers["Content-Language"] = page.language or site.language
+	page.headers["X-Powered-By"] = scribe_xpowered
+
 	if page.editors ~=false then
 		-- editors can be applied to any content-type, thus they must check the type themselves
 		log.Debug() page.state = 10
@@ -210,20 +216,14 @@ function Request(request) -- request can be built in the server, typically by ca
 		end
 	end
 
+	if page.cookies then scribe.SetCookies() end
+
 	-- if page.error and not page.abandoned then
 	-- 	-- an error view or any other handler can intervene to catch errors but must call Dump which will prevent further error handling unless subsequent errors occur which will have a subsequent dump
 	-- 	-- any error beyond at this point can only be output as a serialised string
 	-- 	scribe.Abandon "generic/error"
 	-- 	_G.output = table_concat(_G.output)
 	-- end
-
-	if page.cookies then scribe.SetCookies() end
-	if page.modified and not page.locks then
-		page.headers["Last-Modified"] = page.headers["Last-Modified"] or util_HttpDate(page.modified or page.created) -- don't change if already set, otherwise nil if no dates; must disable when logging>4 to prevent webserver sending 304 not-modified
-	end
-	page.headers["Content-Type"] = types.content[page.type] or page.type
-	page.headers["Content-Language"] = page.language or site.language
-	page.headers["X-Powered-By"] = scribe_xpowered
 
 	log.Info(); local cpuclock=os.clock(); page.headers["X-Moonstalk"] = table_concat{scribe_xmoonstalk,"uptime=",calendar.TimeDifference(request.time,moonstalk.started,"?(days)d?(hours)h?(minutes)m"),"; request=",scribe.hits,"; cputotal=",cpuclock,"; cputime=",util.Decimalise(cpuclock - request.cpuclock,4)}
 end
