@@ -582,12 +582,34 @@ function Section (name) -- TODO: -- DEPRECATE: easier just to use local function
 	page.sections.output = name -- for simpler introspection -- TODO: get rid of this in favour of _priors
 end
 scribe_Section = Section
+
 function Insert (section) -- TODO: maybe add a preserve option that does an append and adjusts marks associated with this section to the new positions (i.e. +#output)
 	if not page.sections[section] then return end
 	log.Debug("Insert "..section)
 	-- appends the named section at the end of the output (e.g. the current point in a view / section)
 	_G.output.length=_G.output.length+1; _G.output[_G.output.length] = table_concat(page.sections[section]) -- same as write(); performing concatenation is much faster than an array append, but destorys marks
 end
+
+do local file_cache={}
+function InlineFile(path)
+	-- reads and caches a file, inserting it into the output
+	-- typically used for inlineing content that has been saved as a seperated self-contained file for better speration, e.g. <script>?(scribe.InlineFile"view.js")</script>
+	-- TODO: watch the file for changes and update the cache automatically
+	if not file_cache[path] or node.dev then
+		local file,err = io.open(path,"r")
+		if err then return scribe.Error{title="Cannot inline file: "..string.match(path,"[^/]+$"), detail=err} end
+		-- TODO: strip comments from js files using a loader
+		local type = string.match(path,"%.(.+)$")
+		local data = file:read("*a")
+		if type =="css" then
+			data = string.gsub(data,"/* .-*/","")
+		elseif type =="js" then
+			data = string.gsub(data,"// .-\n","")
+		end
+		file_cache[path] = data
+	end
+	return file_cache[path]
+end end
 
 end -- of the locals
 
