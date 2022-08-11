@@ -596,15 +596,13 @@ function InlineFile(path)
 	-- typically used for inlineing content that has been saved as a seperated self-contained file for better speration, e.g. <script>?(scribe.InlineFile"view.js")</script>
 	-- TODO: watch the file for changes and update the cache automatically
 	if not file_cache[path] or node.dev then
-		local file,err = io.open(path,"r")
+		local data,err = util.FileRead(path)
 		if err then return scribe.Error{title="Cannot inline file: "..string.match(path,"[^/]+$"), detail=err} end
-		-- TODO: strip comments from js files using a loader
-		local type = string.match(path,"%.(.+)$")
-		local data = file:read("*a")
+		local type = string.match(path,"[^%.]+$")
 		if type =="css" then
-			data = string.gsub(data,"/* .-*/","")
+			data = string.gsub(data,"/%* .-%*/","")
 		elseif type =="js" then
-			data = string.gsub(data,"// .-\n","")
+			data = string.gsub(data,"// .-\n","\n")
 		end
 		file_cache[path] = data
 	end

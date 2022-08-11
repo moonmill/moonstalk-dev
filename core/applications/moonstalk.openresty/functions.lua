@@ -104,6 +104,7 @@ function Starter()
 	end
 	openresty.Request = openresty._Request -- we must only handle requests after the moonstalk environment is fully ready which includes other Starters, thus we return an anonymous finaliser that is run only once all starters have completed
 	openresty._Request = nil
+	util.FileRead = openresty._util_FileRead
 end end
 
 local moonstalk_Resume = moonstalk.Resume
@@ -260,6 +261,11 @@ do local openresty_shell = require "resty.shell" -- {package=false}; bundled
 function util.Shell(command,read) -- replaces util.Shell for native non-blocking support
 	local ok, stdout, stderr = moonstalk_Resume(openresty_shell.run,command) -- ok, stdout, stderr, reason, status
 	return stdout or stderr	-- the original behaviour is to return stdout or stderr; it is up to the caller to determine what is being returned by way of string inspection
+end end
+
+do local util_FileRead = util.FileRead
+function _util_FileRead(path)
+	return moonstalk_Resume(util_FileRead,path)
 end end
 
 -- # async http
