@@ -41,6 +41,13 @@ function Load(name,quiet)
 	if err and (not quiet or not string.sub(err,1,12) =="No such file") then return moonstalk.Error{databin, level="Alert", title="Cannot load "..name, detail=err} end
 	return data,err
 end
+function Reload(name)
+	if not db[name] or not moonstalk.databases.tables[name] then return moonstalk.Error("Undeclared databins table: "..name)
+	elseif moonstalk.databases.tables[name].autosave ==moonstalk.server then return moonstalk.Error("Cannot reload a databins table which autosaves on this instance: "..name) end
+	local data = databin.Load(name)
+	if not data then return end
+	db[name] = data
+end
 
 do local posix_unistd = require "posix.unistd" -- {package="luaposix"}
 function Cache(options)
@@ -89,24 +96,28 @@ end
 
 function Starter()
 	local autosave_default = ifthen(moonstalk.scribe.instances ==1,"scribe")
-	local errored,error
+	local error
 	for name,table in pairs(moonstalk.databases.tables) do
 		table.system = table.system or "databin"
 		table.autosave = table.autosave or autosave_default
 		if table.system =="databin" then
 			databin.managing = databin.managing +1
 			if table.autosave ==moonstalk.server then databin.autosave = true end
-			_G.db[name],error = databin.Load(name,true) or {}
-			if error then errored = {databin, log.Priority, title="Cannot load table '"..name.."'", detail=error} end
+			local data,error = databin.Load(name,true) or {}
+			if error then
+				moonstalk.BundleError(databin, {databin, log.Priority, title="Cannot load table '"..name.."'", detail=error})
+			else
+				_G.db[name] = data
+			end
 		end
 	end
-	if errored then return moonstalk.BundleError(databin,errored) end
 	if databin.autosave and moonstalk.server=="scribe" and moonstalk.scribe.instances >1 then
 		moonstalk.Error{databin, title="Autosave is disabled because multiple scribe instances are in use"}
 		databin.autosave = false
 	elseif databin.managing >0 and not databin.autosave then
 		log.Info"Autosave is not enabled for this server"
 	end
+	if databin.errors[1] then return end
 	databin.managed = true
 end
 
