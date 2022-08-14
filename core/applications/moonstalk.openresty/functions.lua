@@ -40,8 +40,8 @@ multipart = { -- can be changed globally by setting openresty.multipart[key] or 
 	max_get_args     = 50,
 	mas_post_args    = 50,
 	max_line_size    = 512,
-	max_file_size    = 0, -- bytes; default is to disable uploads thus this must be set
-	max_file_uploads = 5,
+	max_file_size    = 100000000, -- bytes / 100MB; this is somewhat redundant as address.post.maxsize applies, however this applies to individual files thus might be set to a lower value if needed
+	max_file_uploads = 1,
 }
 requests = 0 -- concurrent requests, e.g. when a coroutine or Resume is used during a request, another waiting one will start processing -- TODO: NOTE: will not decrement in case of an abort, need a method to solve this
 
@@ -112,33 +112,26 @@ do
 local reqargs = require"resty.reqargs" -- {package="lua-resty-reqargs"}
 local ngx_req_get_post_args = ngx.req.get_post_args
 local ngx_req_read_body = ngx.req.read_body
-local util_CopyWith = util.CopyWith
+local util_MergeIf = util.MergeIf
 local pairs = pairs
-function GetPost(multipart_options,request)
+function GetPost()
 	-- multipart_options = false to parse only urlencoded (e.g. for lighweight payloads such as signin)
 	-- transparently handles file buffering to disk, which can also be configured in nginx.conf per https://github.com/bungle/lua-resty-reqargs
 	-- check request.form._error or the second return argument
-	-- causes processing to wait for the body to be received (it is thus preferable to call after having performed authentication and otehr preparatory database calls once more or all of the body is likely to hevae been received, e.g. call it from a controller)
-	request = request or _G.request -- we call from the openresty handler which doesn't populate the global, but we also call from apps which thus expect the global to be used
+	-- causes processing to wait for the body to be received (it is thus preferable to call after having performed authentication and otehr preparatory database calls once more or all of the body is likely to have been received, e.g. call it from a controller)
+	local request = _G.request
 	if request.type =="application/x-www-form-urlencoded" then
-		-- this encoding isn't used to upload files thus doesn't handle the scenario of being buffered to disk
 		local foo,bar = moonstalk_Resume(ngx_req_read_body) -- async function (as can be invoked before the full payload has been received)
-		local error
-		request.form,error = ngx_req_get_post_args() or request.form
-		request.form._error = error
+		local form,err = ngx_req_get_post_args()
+		if err then scribe.Error{realm="form",title="Reqargs urlencoded form error: "..err} end -- TODO: option to not throw
 		-- errors are only typical if client_body_buffer_size and client_max_body_size do not match
-		return request.form,error
-	elseif multipart_options ==false then return
+		request.form = form
 	elseif request.type =="multipart/form-data" then
-		-- reqargs adds parsed request.body which is not a normalised behaviour -- TODO: unset it?
-		if multipart_options then multipart_options = util_CopyWith(openresty.multipart,multipart_options) end
-		local get,files
-		get,request.form,files = moonstalk_Resume(reqargs, multipart_options or openresty.multipart)
-		if not get and request.form then -- error
-			request.form = {_error=request.form}
-			scribe.Error{realm="form",title="Multipart upload error: "..request.form._error} -- TODO: option to not throw
-		elseif files then
-			local form = request.form
+		local multipart_options = util_MergeIf(openresty.multipart, page.post)
+		local get,form,files = moonstalk_Resume(reqargs, multipart_options)
+		if not get and form then scribe.Error{realm="form",title="Multipart upload error: "..form} end -- nil,error -- TODO: option to not throw
+		request.form = form
+		if files then
 			for key,item in pairs(files) do -- TODO: create a timer function/worker that removes these files when the request is done unless flagged file.remove=false
 				-- normalise; {field.name={name="original-filename.extension", file="path/to/temp/file"},…}
 				if item.size >0 then
@@ -146,13 +139,13 @@ function GetPost(multipart_options,request)
 					item.name = item.file
 					item.file = moonstalk.root.."/"..item.temp
 				else
-					request.form.files[key] = nil
+					form.files[key] = nil
 					os.remove(item.file) -- FIXME: empty files should not be saved by reqargs!
 				end
 			end
 		end
-		return request.form,request.form._error
 	else
+		-- when wanting to process other types of post: address.post={form=false}
 		scribe.Error{realm="form",title="Unsupported post encoding: "..request.type}
 	end
 end end
@@ -169,7 +162,7 @@ function Respond() -- this could be optimised to be inline in content_by_lua_blo
 	ngx_print(_G.output)
 	concurrency = concurrency -1
 	log.Debug("request completed with status "..page.status)
-	log.Info() ngx.update_time(); page.headers["X-Moonstalk"] = table.concat{page.headers["X-Moonstalk"],"; walltime=",util.Decimalise(ngx.now() - request.time,4)}
+	log.Info() ngx.update_time(); page.headers["X-Moonstalk"] = table.concat{page.headers["X-Moonstalk"] or "", "; walltime=",util.Decimalise(ngx.now() - request.time,4)}
 	ngx_exit(200)
 end
 
@@ -191,6 +184,7 @@ local pcall = pcall
 local keyed = keyed
 local split = split
 local setmetatable = setmetatable
+local EMPTY_TABLE = EMPTY_TABLE
 function _Request()
 	concurrency = concurrency +1 -- counter for async/concurrent requests -- OPTIMIZE: needs to reset when an error is thrown otherwise keeps growning in such cases, currently we can assume the most likely scenarios of errors in views and controllers are handled, errors in application functions are not caught but for now it can be considered a scenrario that is caught by testing and thus never deployed; this would require calling Request with pcall in server and handling the error there, and thus also handling all the variances notably for views and controllers
 	local request = {
@@ -204,15 +198,9 @@ function _Request()
 		agent =ngx.var.http_user_agent or "", -- not always present
 		client = {ip=ngx.var.remote_addr, languages={}, keychain={}},
 		cookies= {},
+		-- form is specified in scribe as EMPTY_TABLE, then replaced by GetPost when required
 		headers =ngx_req_get_headers(), -- transforms to lowercase but also provides a metatable to handle mixedcase and underscore variants -- TODO: use a metatable that only fetches from ngx.var[name] but has to transform dashes to underscore
 	}
-	if request.method ~="POST" then
-		request.form = EMPTY_TABLE
-	else
-		request._type =ngx.var.content_type
-		request.type = string_match(request._type, "([^;]+)")
-		openresty.GetPost(false,request) -- parse only if urlencoded, else must be explict
-	end
 	_G.now = request.time
 	if request.query_string then
 		-- it is not notably expensive to parse the query string thus we always do so, unlike the form

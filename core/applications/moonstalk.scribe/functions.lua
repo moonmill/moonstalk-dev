@@ -2,7 +2,7 @@
 -- WARNING: in async servers except those using LuaJIT, View and Controller use pcall/xpcall which are not resumable and thus cannot contain yielding code -- TODO: add a toggle to remove this and run them unprotected which will of course break error handling and require a handler to catch the server's thrown error, if possible
 -- OPTIMIZE: use a top level pcall in openresty and remove the view/controller pcalls except in dev mode as they provide more nuanced errors; but such a generic handler could in any case simply look at the page.state to define it's error title; we could also re-run the request enabling xpcall instead
 
-states = {[0]="creation",[1]="curation",[2]="collation",[2]="identification",[4]="authentication",[6]="controller",[7]="view",[8]="template",[9]="",[10]="editing",[15]="abandoned"} -- only controller and view are set in all modes (due to introspection requirement for extensions), otherwise dev mode is required
+states = {[0]="creation",[1]="curation",[2]="collation",[3]="form",[4]="identification",[5]="authentication",[6]="controller",[7]="view",[8]="template",[9]="",[10]="editing",[15]="abandoned"} -- only controller and view are set in all modes (due to introspection requirement for extensions), otherwise dev mode is required
 
 default_site = {
 	language=node.language,
@@ -61,6 +61,7 @@ local split = split
 local table_concat = table.concat
 local string_sub = string.sub
 local util_Transliterate = util.Transliterate
+local util_TablePathAssign = util.TablePathAssign
 local util_Match = util.Match
 local util_ArrayAdd = util.ArrayAdd
 local util_Pad = util.Pad
@@ -73,6 +74,11 @@ local scribe_Controller,scribe_View,scribe_Section
 local scribe_curators = {}; curators = scribe_curators
 local scribe_xpowered = "Moonstalk/".. node.version -- we do not reveal the actual server (openresty) to avoid facilitating attacks, it may however be fairly obvious, and with logging >= Info the X-Moonstalk header is added with this detail
 local scribe_xmoonstalk = "" -- placeholder until after intialisation
+local EMPTY_TABLE = EMPTY_TABLE
+
+post = {maxsize=32000, ignore_methods=keyed{"GET","HEAD"}} -- all other methods with a body that exceeds a declared address.post.maxsize or scribe.post.maxsize (32KB) will be rejected
+local bodyless_methods = scribe.post.ignore_methods
+
 function Request(request) -- request can be built in the server, typically by calling the server's request generation function which returns it, but at this point has no access to other globals
 	-- generic request handling after normalisation by the server
 	local _G = _G -- the global environment as an upvalue to optimise performance
@@ -93,7 +99,7 @@ function Request(request) -- request can be built in the server, typically by ca
 
 	-- # Scribe globals
 	_G.user = false
-	_G.page = { state=0, status=200, type="html", data={}, headers={}, sections={content={"",length=1}, output="content"} } -- TODO: don't create data? -- NOTE: APIs and anything serving other content types must explictly declare the type
+	_G.page = { state=0, status=200, type="html", headers={}, sections={content={"",length=1}, output="content"} } -- TODO: don't create data? -- NOTE: APIs and anything serving other content types must explictly declare the type
 	_G.output = page.sections.content
 	local page = page
 
@@ -128,26 +134,62 @@ function Request(request) -- request can be built in the server, typically by ca
 	for _,Collator in ipairs(page.collate or site.collate) do -- NOTE: if a curator wishes to prevent collation then it may set page.collate = {}
 		if Collator() then page.collate = true; break end
 		-- typically used to retreive and populate data, notably the page; must explictly return true to prevent any following collators from running (such as for default not found page handler); may also act upon globals such as user, and retreive and set static page content by calling write(content), set page.controller or page.view etc; should identify and populate user and preferences, with scribe.Token() and SetSession() as appropriate
-		-- may also be set by the Curator/Binder site.collate={Function, …}; or page.collate may be set to false for sites or pages that do not need to check the db for the user session, such as for API methods where the client.id or some other token will be passed by the method's controller to it's own dedicated procedure; to avoid invoking when unnecessary, either the token cookie needs to be present (i.e. set upon signin) or a token query param needs to be provided which the authenticator will usually attempt to exchange for a corresponding cookie; authenticator functions should not invoke errors if the token is invalid and should generally remove it silently; if a page is locked after invocation the scribe will itself show the authenticate page
+		-- may also be set by the Curator/Binder site.collate={Function, …}; or page.collate={} for sites or pages that do not need collation
 	end
-	if not page.collate then page.view = "generic/not-found" end
+	if not page.collate then
+		page.view = "generic/not-found"
+	elseif bodyless_methods[request.method] then
+		request.form = EMPTY_TABLE
+	else
+		page.state = 3
+		request.type = string_match(request.headers['content-type'], "([^;]+)")
+		if tonumber(request.headers['content-length']) > (page.post or scribe.post).maxsize then
+			page.status = 413; output = "request body too large"; return -- returning immediately thus must provide string not table
+			-- in an async server this should occur before a large body has been fully read, thus we can reject if not permitted, before it has been fully received, written to a temporary file, and processed; however if the curator and collator use database calls, then a significaant part of the body may already have been received by this point thus presenting greater DoS opportunity on all moonstalk processed addresses
+		end
+		if request.method =="POST" and (not page.post or page.post.form ~=false) then
+			log.Debug"preparing form"
+			scribe.GetPost()
+			page.headers['Cache-Control'] = "no-cache" -- nothing accepting GET or POST params should be cached; there are scenarios where however the GET params do not modify content and these should set nocache = nil
+			-- strip empty values and sanitise
+			local number
+			local count = 0
+			local form = request.form
+			for name,value in pairs(form) do
+				number = tonumber(value); if number and tostring(number) ==value then value = number end -- we coerce (small) integer values; but not numbers that contain any formatting to avoid locale and zero-prefixed number issues; -- NOTE: this also has the desirable side-effect that IDs are not coerced to numbers, and thus their (inappropriate) use outside the internal scope requires explicit coercion
+				if count >60 then
+					scribe.Error "Too many form parameters" break -- we only checked the size of GET with a POST to protect against runaway parsing, this covers GET or POST individually
+				elseif value =="" then -- ignore, don't set thus becomes nil
+				elseif page.post.expand and string_find(name,".",1,true) then
+					-- Create subtables from '.' delimited names
+					util_TablePathAssign(form,name,value)
+				else
+					form[name] = value
+				end
+				count = count +1
+			end		
+			-- Log the form, but truncating long values
+			log.Debug() local logform=truncate(form,42) if form.password then logform.password="…" end log.Debug(logform)
+		end
+	end
 
 	-- # client identification
-	page.state = 3
 	-- this takes place after curation because sites can set their own token names
 	-- where curation wants to include the user, the curator should perform this itself
 	if request.headers.cookie or request.query["≈"] then -- this query argument makes it possible to use a token to sign-in on any URL, but is thus a protected argument name; this is not strictly necessary to support in the generic codebase as is a fairly specific requirement, however the alternative would require using a collator function to perform the check and set the value
+		page.state = 4
 		request.client.token = request.query["≈"] or request.cookies[site.token_name] -- this indicates a signed-in or previously identified user
 		request.client.id = util.DecodeID(request.client.token) -- matches an existing session ID; failure is silent (eg. if node.secret was changed) or in case of attack, and for protected resources would get caught by locks resulting in unauthorised, otherwise the usual signed-out representation
 	end
 
 	-- # authentication
-	-- this depends upon page.locks which may prevent it, however if a collator wants to perform it earlier it may
-	page.state = 4
-	if page.locks ~=false and (request.client.id or request.form.action =="Signin") and (page.Authenticator or site.Authenticator) then (page.Authenticator or site.Authenticator)() end -- Authenticator can be set to false in both cases but if page.Authenticator is given site set to false will be ignored; Authenticators fetch the user identified by the request.client.token and populates the _G.user table generally with at least nick and keychain; can be disabled with address.locks=false if the page uses it's own authentication mechanism such as not employing the request.client.token
-	-- now that we may have a user, we can validate against page if locked
+	-- this depends upon page.locks which may prevent it, however if a collator wants to perform authentication earlier it may
 	if page.locks then
-		page.nocache = true -- nothing with authentication restrictions should be cached; this is currently implemented by Kit
+		page.state = 5
+		if (request.client.id or request.form.action =="Signin") and (page.Authenticator or site.Authenticator) then (page.Authenticator or site.Authenticator)() end -- disable with address.locks=false if the page uses it's own authentication mechanism such as not employing the request.client.token; Authenticator can be set to false in both cases but if page.Authenticator is given site set to false will be ignored; Authenticators fetch the user identified by the request.client.token and populates the _G.user table generally with at least nick and keychain
+		-- to avoid invoking when unnecessary, either the token cookie needs to be present (i.e. set upon signin) or a token query param needs to be provided which the authenticator will usually attempt to exchange for a corresponding cookie; authenticator functions should not invoke errors if the token is invalid and should generally remove it silently; if a page is locked after invocation the scribe will itself show the authenticate page
+		-- now that we may have a user, we can validate against page if locked
+		page.headers['Cache-Control'] = "no-cache" -- nothing with authentication restrictions should be cached; this is currently implemented by Kit
 		page.headers.Vary = util.AppendToDelimited("Cookie", page.headers.Vary, ",") -- ensure caches refresh protected content when requested with a cookie
 		local unlocked
 		if not next(page.locks) then
@@ -210,8 +252,8 @@ function Request(request) -- request can be built in the server, typically by ca
 	if page.editors ~=false then
 		-- editors can be applied to any content-type, thus they must check the type themselves
 		log.Debug() page.state = 10
-		for _,Editor in ipairs(site.editors) do
-			log.Debug("applying Editor "..site.editors[Editor])
+		for _,Editor in ipairs(page.editors or site.editors) do
+			log.Debug("applying Editor "..(site.editors[Editor] or "from page"))
 			Editor()
 		end
 	end
@@ -228,49 +270,7 @@ function Request(request) -- request can be built in the server, typically by ca
 	log.Info(); local cpuclock=os.clock(); page.headers["X-Moonstalk"] = table_concat{scribe_xmoonstalk,"uptime=",calendar.TimeDifference(request.time,moonstalk.started,"?(days)d?(hours)h?(minutes)m"),"; request=",scribe.hits,"; cputotal=",cpuclock,"; cputime=",util.Decimalise(cpuclock - request.cpuclock,4)}
 end
 
-
 -- # Public Scribe functions
-
-function Posted(options)
-	-- must be called in order to consume request.form[field] values including request.form.files
-	-- typical usage: if request.post then scribe.Posted(); if request.form.action=="" then … end end
-	if request.form._parsed or request.method ~="POST" then return end
-	request.type = string_match(request.type,"([^;]+)")
-	log.Debug"preparing form"
-	scribe.GetPost(options) -- provided by the server
-	request.form._parsed = true
-	local form = request.form
-	if page.form then copy(page.form,form,false,false) end -- can be specified in addresses
-	page.nocache = true -- nothing accepting GET or POST params should be cached; there are scenarios where however the GET params do not modify content and these should set nocache = nil
-	-- strip empty values and sanitise
-	local number
-	local count = 0
-	for name,value in pairs(form) do
-		number = tonumber(value); if number and tostring(number) ==value then value = number end -- we coerce (small) integer values; but not numbers that contain any formatting to avoid locale and zero-prefixed number issues; -- NOTE: this also has the desirable side-effect that IDs are not coerced to numbers, and thus their (inappropriate) use outside the internal scope requires explicit coercion
-		if count >60 then
-			scribe.Error "Too many form parameters" break -- we only checked the size of GET with a POST to protect against runaway parsing, this covers GET or POST individually
-		elseif value =="" then -- ignore, don't set thus becomes nil
-		elseif string_find(name,".",1,true) then
-			-- Create subtables from '.' delimited names
-			util.TablePathAssign(form,name,value)
-		else
-			form[name] = value
-		end
-		count = count +1
-	end
-	-- WARNING: HTML5 multi file inputs are output as an array ONLY when they contain multiple files, see following example to handle correctly
-	--[[ if not request.form.files[1] then -- one file, no array
-			request.form.files = {request.form.files}
-		elseif request.form.files.contents then -- there appears to be a bug with wsapi where only files > 1 get put in an array
-			table_insert(request.form.files, 1, {contents=request.form.files.contents,['content-type']=request.form.files['content-type'], name=request.form.files.name, size=request.form.files.size,1} )
-		end
-	end
-	--]]
-
-	-- Log the form, but truncating long values
-	log.Debug() local logform=truncate(form,42) if form.password then logform.password="…" end log.Debug(logform)
-	form._parsed = true
-end
 
 function Page(path,env)
 	-- executes a view and/or controller for the current site
@@ -285,7 +285,6 @@ function Page(path,env)
 	end
 	return true
 end
-
 
 function Controller(path,env)
 	local controller = site.controllers[path]
@@ -991,16 +990,33 @@ end
 function Abandon() end -- placeholder during intialisation
 do local function RenderAbandon(what,name,object)
 	if not object then
-		_G.output={"Couldn't abandon to missing "..what..": "..name}
-		scribe.Error(output[1])
+		page.abandoned ={"Couldn't abandon to missing "..what..": "..name}
+		scribe.Error(page.abandoned)
 		return false
 	elseif object.static then
-		_G.output[1] = object.static
-	elseif not pcall(object.loader) then
-		_G.output={"Couldn't abandon due to error in "..what..": "..object.id}
-		scribe.Error(output[1])
-		return false
+		page.abandoned = object.static
+	else
+		local result,response = pcall(object.loader)
+		if not result then
+			page.abandoned ={"Couldn't abandon due to error in "..what..": "..object.id.." "..response}
+			scribe.Error(page.abandoned)
+			return false
+		end
 	end
+end
+function AbandonedEditor()
+	-- generates a page containing the collected errors
+	page.sections = {output="content",content={"",length=1}}
+	_G.output = page.sections.content
+	-- generic views and templates are expected to not fail, thus we fall back to them in case they have been overridden
+	if RenderAbandon("view",page.abandoned, site.views[page.abandoned]) ==false then
+		RenderAbandon("view",page.abandoned, generic.views[page.abandoned])
+	end
+	scribe.Section"template"
+	if RenderAbandon("view","template", site.views["template"] or site.views["generic/template"]) ==false then
+		RenderAbandon("view","template", generic.views.template)
+	end
+	_G.output = table.concat(_G.output)
 end
 function _Abandon(to)
 	-- takes either a numeric status in which case no content is rendered, or a page name in which case that page (view and/or controller) is responsible for setting the page.status else it defaults to 500
@@ -1010,34 +1026,26 @@ function _Abandon(to)
 	-- site template must be capable of running without its controller (i.e. only references the root of page.temp)
 	-- assumes the view uses a template -- TODO: check view.template
 	-- TODO: (low) an error before the end of a view's output that does not return/is not caught results in additional output that should be dropped; only applies to non top-level pcall use
-	if page.abandoned then return end
 	to = to or "generic/error"
 	log.Info("Abandoning to "..(to or "[empty]").." from "..(page.address or request.path or '-none-'))
-	if output.length and output.length >1 then
-		-- discard all failed output
-		page.sections.content={"",length=1}
-		_G.output = page.sections.content
-	end
-	-- NOTE: with a top-level pcall the following flags are redundant as the remainder of the request cycle is skipped
-	page.abandoned = true
-	page.headers = {
-		['Content-Type'] = "text/html",
-		['X-Powered-By'] = scribe.xpowered,
-	}
-	page.template = false
+	if page.abandoned then return end -- no need to reset all the atributes again in case there's multiple errors
+	page.abandoned = to
+	page.headers = EMPTY_TABLE
+	page.type = "html"
+	page.locks = false
 	page.collate = false
 	page.view = false
-	page.controller = nil
-	page.editors = false
+	page.controller = false
+	page.template = false
+	page.editors = {scribe.AbandonedEditor} -- generates the output to return as the response 
+	page.cookies = false
+	page.status = 500 -- default, the given page may override
 	if type(to) =='number' then
 		-- no need to render content
 		page.status = to
+		page.editors = false
 		return
 	end
-	page.status = 500 -- default, the given page may override
-	if RenderAbandon("view",to,site.views[to]) ==false then return end
-	scribe.Section"template"
-	RenderAbandon("view","template",site.views["template"] or site.views["generic/template"])
 end end
 
 function Errored(err,trace)
