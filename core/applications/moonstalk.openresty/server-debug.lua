@@ -4,7 +4,7 @@ if not moonstalk then
 	moonstalk.Initialise{server="scribe"}
 end
 
-local result,error = xpcall(scribe.Request, debug.traceback, openresty.Request()) -- dev mode; we don't just catch errors, but give them a traceback
+openresty.Request()
+local result,error = xpcall(scribe.Request, debug.traceback) -- dev mode; we don't just catch errors, but give them a traceback
 if not result then scribe.Errored(error,true) end
-
 openresty.Respond()

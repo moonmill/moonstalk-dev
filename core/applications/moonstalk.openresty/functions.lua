@@ -224,7 +224,7 @@ function _Request()
 	if request.headers.cookie then
 		setmetatable(request.cookies, CookieReader) -- DEPRECATE: and simply use scribe.Cookie"name" which openresty can replace
 	end
-	return request
+	_G.request = request
 end
 end
 

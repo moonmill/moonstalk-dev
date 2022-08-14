@@ -79,7 +79,7 @@ local EMPTY_TABLE = EMPTY_TABLE
 post = {maxsize=32000, ignore_methods=keyed{"GET","HEAD"}} -- all other methods with a body that exceeds a declared address.post.maxsize or scribe.post.maxsize (32KB) will be rejected
 local bodyless_methods = scribe.post.ignore_methods
 
-function Request(request) -- request can be built in the server, typically by calling the server's request generation function which returns it, but at this point has no access to other globals
+function Request() -- request can be built in the server, typically by calling the server's request generation function which returns it, but at this point has no access to other globals
 	-- generic request handling after normalisation by the server
 	local _G = _G -- the global environment as an upvalue to optimise performance
 	-- NOTE: the server must set _G.now = os.time(), however os.time performs a syscall
@@ -87,7 +87,7 @@ function Request(request) -- request can be built in the server, typically by ca
 
 	-- # Moonstalk globals
 	-- no locale is required until a site is available
-	_G.request = request
+	local request = _G.request
 	request.identifier = scribe.hits
 	log.Info() request.identifier = util_Pad(scribe.hits,3)
 	request.rooturl = request.scheme.."://"..request.domain.."/" -- ?(request.rooturl)my/path
@@ -1010,10 +1010,14 @@ function AbandonedEditor()
 	_G.output = page.sections.content
 	-- generic views and templates are expected to not fail, thus we fall back to them in case they have been overridden
 	if RenderAbandon("view",page.abandoned, site.views[page.abandoned]) ==false then
+		page.section.content={"",length=1}
+		_G.output = page.sections.content
 		RenderAbandon("view",page.abandoned, generic.views[page.abandoned])
 	end
 	scribe.Section"template"
 	if RenderAbandon("view","template", site.views["template"] or site.views["generic/template"]) ==false then
+		page.sections.template={"",length=1}
+		_G.output = page.sections.template
 		RenderAbandon("view","template", generic.views.template)
 	end
 	_G.output = table.concat(_G.output)
@@ -1049,13 +1053,14 @@ function _Abandon(to)
 end end
 
 function Errored(err,trace)
-	local err = {title="Error in "..scribe.states[page.state], detail=err}
+	-- handles an error caught interrupting scribe.Request
+	err = {title="Error in "..scribe.states[page.state], detail=err}
 	if trace then
 		scribe.Errorxp(err)
 	else
 		scribe.Error(err)
 	end
-	if type(_G.output) =='table' then _G.output = table.concat(output) end
+	scribe.AbandonedEditor()
 end
 
 function Error(err)

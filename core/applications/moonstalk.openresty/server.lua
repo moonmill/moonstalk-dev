@@ -4,6 +4,6 @@ if not moonstalk then -- first call initialises Moonstalk; this is an extremely 
 	moonstalk.Initialise{server="scribe"} -- TODO: node.scribe.server=="openresty"
 end
 
-if not pcall(scribe.Request, openresty.Request()) then scribe.Errored() end -- we catch errors, however without a traceback we know nothing about what caused it -- FIXME: given that runtime errors should be extremely rare, would be better to eliminate the pcall and just use a generic error page rather than handling in moonstalk
-
+openresty.Request()
+if not pcall(scribe.Request) then scribe.Errored() end -- we catch errors, however without a traceback we know nothing about what caused it -- FIXME: given that runtime errors should be extremely rare, would be better to eliminate the pcall and just use a generic error page rather than handling in moonstalk
 openresty.Respond()
