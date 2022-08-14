@@ -75,7 +75,7 @@ elevator.functions.openresty = function ()
 		local installdir = "core/applications/moonstalk.openresty"
 		local installdir = util.Shell("readlink "..installdir) or (moonstalk.root.."/core/applications/moonstalk.openresty") -- nginx will only follow one symlink, thus we must resolve the actual path in case the app is a symlink
 		util.Shell("mkdir temporary/nginx")
-		util.Shell("ln -s "..installdir.."/defaults "..moonstalk.root.."/temporary/nginx/")
+		util.Shell("ln -s "..installdir.."/defaults temporary/nginx/defaults")
 		util.Shell("ln -s "..moonstalk.root.."/data/configuration temporary/nginx/data")
 	end
 
@@ -132,9 +132,13 @@ elevator.functions.openresty = function ()
 		table.insert(conf, "    include defaults/server.conf;")
 		-- insert a custom config, this can take precedence over moonstalk's directives
 		-- this conf can be used such as to declare: add_header Content-Security-Policy "default-src 'self'"
-		if site.files['private/nginx.conf'] then
-			table.insert(conf, "    include ../../"..site.path.."/private/nginx.conf;") -- relative to temporary/nginx
+		if util.FileExists(site.path..'/private/nginx.conf') then
+			table.insert(conf, util.FileRead(site.path..'/private/nginx.conf'))
+		else
+			-- provide some defaults
+			-- table.insert(conf, "#  client_max_body_size 32k;\n") -- this does not work becaus enginx only accepts a single declaration thus cannot be overriden by location
 		end
+		-- TODO: for all locations except moonstalk, reject any method that is not GET, thus preventing POSTs with large payloads such as used for a DoS
 		table.insert(conf, "    location ^~ /.well-known/ {root "..site.path.."/;}") -- slightly more efficient than invoking the file regex
 		table.insert(conf, "    location ^~ /public/ {root "..site.path.."/;}") -- slightly more efficient than invoking the file regex
 		-- the following is a backwards/end match for a period at position -3 or -4, thus long extensions are NOT matched and would require a dedicated location directive
@@ -145,8 +149,12 @@ elevator.functions.openresty = function ()
 		table.insert(conf, [[    location ~ "\.\w{2,5}$" {root ]]..site.path..[[/;} # matches all root assets (with extensions) on site domains but invokes regex to do so]])
 		-- finally we handle everything else with moonstalk, this is actually a prefix match so it will match every request, but the longest is used is another prefix matches, or if no regex matches this is thus the longest prefix
 		-- first call initialises Moonstalk; this is an extremely lightweight check of initialisation to perform with each request without using the only slightly more expensive require mechanism
-		table.insert(conf, "    location / {content_by_lua_file "..openresty.path.."/"..ifthen(node.dev,"server-debug.lua","server.lua")..";}")
-		-- TODO: check addresses for any with max_file_size and declare seperate locations for them with client_max_body_size 10m and client_body_buffer_size then reduce the defaults for these in server.conf
+		table.insert(conf, [[    location / {
+			content_by_lua_file ]]..openresty.path.."/"..ifthen(node.dev,"server-debug.lua","server.lua")..[[;
+			client_max_body_size 0;
+		}]])
+		-- NOTE: the scribe rejects POSTs following curation when not enabled with address.post.maxsize
+		-- TODO: check addresses for any with post and declare seperate locations for them with client_max_body_size = post.maxsize and also apply defaults of client_max_body_size 32k to all other locations
 		table.insert(conf,"  }") -- close server
 	end
 	table.insert(conf,"}") -- close http as will be replaced by gsub

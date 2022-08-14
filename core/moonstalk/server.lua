@@ -15,7 +15,7 @@ _G.db = {} -- the public interface for table-field retrieval, is structured by d
 _G.model = {} -- a public interface used by some database systems to provide model conversion with named records from the schema e.g. model[record](…) will convert from/to the internal database structure; note that this should be performed transparently when using db or cache
 _G.site = {} -- strictly this is scribe specific, but in the teller we propogate it with Environment()
 _G.logging = 4
-_G.EMPTY_TABLE = {}
+_G.EMPTY_TABLE = {} -- TODO: if node.debug set a metatable that throws an error when modified
 
 -- moonstalk tables
 _G.moonstalk = {

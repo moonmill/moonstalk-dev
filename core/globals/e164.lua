@@ -1,6 +1,6 @@
 -- for the North America code, we add area codes
 -- TODO: add canadian area codes
-return {
+{
 ['93']={"af"},
 ['355']={"al"},
 ['213']={"dz"},

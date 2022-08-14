@@ -3,7 +3,7 @@
 
 _G.luabins = require "luabins"
 _G.posix_stdlib = require "posix.stdlib" -- {package="luaposix"}
-_G.cipher = require "openssl.cipher" -- {package="luaossl"}
+_G.cipher = require "openssl.cipher" -- {package="luaossl"}; installed as _openssl.so
 _G.mime = require "mime" -- {package="mimetypes"}
 _G.socket = require "socket"
 _G.lfs = require "lfs" -- {package="luafilesystem"}
