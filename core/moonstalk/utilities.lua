@@ -979,17 +979,15 @@ else
 	end
 end
 
-function CopyWith (original,merge)
-	-- returns a shallow copy of the original table, using values from the merge table
-	-- merge is optional and if not provided the original table will be returned
-	-- useful for modifying a default table conditionally
-	-- for larger tables with a small number of modified fields using reuse(copy(original),merge) is more efficient
-	if not merge then return original end
-	local merged = {}
-	for key,value in pairs(original) do
-		merged[key] = merge[key] or value
+function MergeIf (defaults,merge)
+	-- if merge is provided, copies defaults to it, else returns defaults unmodified
+	-- ic a merge should not be modified pass it as a copy util.MergeIf(defdaults,copy(merge))
+	-- useful for modifying a default table conditionally, e.g. table overrides may or may not exist
+	if not merge then return defaults end
+	for key,value in pairs(defaults) do
+		merge[key] = merge[key] or value
 	end
-	return merged
+	return merge
 end
 
 function Concat(...) return table.concat({...}) end -- accepts values as parameters, returning them as a concatenated string; syntactically similar to .. operator but accepts and ignores nils
@@ -1589,9 +1587,9 @@ end
 
 function FileRead(path)
 	local file,err = io.open(path)
-	if err then print(err) return nil,err end
+	if err then log.Notice(err) return nil,err end
 	local data,err = file:read("*a")
-	if err then print(err) return nil,err end
+	if err then log.Notice(err) return nil,err end
 	file:close()
 	return data
 end
@@ -1605,11 +1603,20 @@ function FileSave(path,data,createdirs)
 		end
 	end
 	local file,err = io.open(path, "w+")
-	if err then return nil,err end
+	if err then log.Notice(err) return nil,err end
 	if type(data) ~='string' then data = util.Serialise(data,nil,true) end
 	file:write(data)
 	file:close()
 	return true
+end
+function LoadSerialised(path)
+	-- expects the given file to be an anonymous table as created by Serialise and then saved
+	local data,err = util.FileRead(path)
+	if err then return nil,err end
+	return loadstring("return "..data)()
+end
+function SaveSerialised(path,data)
+	return util.FileSave(path, util.Serialise(data))
 end
 
 function io.linesbackward(filename)
