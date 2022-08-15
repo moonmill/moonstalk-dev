@@ -167,13 +167,12 @@ function SetSession(session,err)
 	request.client = client
 	-- NOTE: the only values that currently needs persisting
 	client.ip = serverclient.ip
-	client.languages = EMPTY_TABLE -- FIXME:
 		-- the follow prefer user values (i.e. persistent settings) but preserve client values (i.e. browser dervived values)
 	-- TODO: support per-domain defaults instead of per-site (e.g. *.co.uk or uk.* locale=uk)
-	client.language = user.language or client.language
-	client.locale = user.locale or client.locale
-	client.timezone = user.timezone or client.timezone
-	client.keychain = user.keychain or {}
+	client.language = user.language
+	client.locale = user.locale
+	client.timezone = user.timezone
+	client.keychain = user.keychain or EMPTY_TABLE
 	if user and not user.token then user.token = util.EncodeID(user.id) end -- OPTIMIZE: this should be done on demand using a metatable call e.g. local token = user.token or user.token()
 	if now > client.seen +time.hour*8 then
 		scribe.Token(client.id) -- if the session hasn't been used for a while force renewal of token expiry, this avoids setting it everytime during a short session; this is slightly redundant when site.token_cookie.expiry is set to a large value but nonetheless still required with low-overhead
@@ -200,7 +199,7 @@ function Authenticator()
 		local preferences = request.cookies.preferences
 		if preferences then
 			client.preferences = true
-			client.languages[1],client.locale,client.timezone = split(locale,",",true) -- DOCUMENT: neater and more efficient than seperate cookies
+			client.language,client.locale,client.timezone = split(locale,",",true) -- DOCUMENT: neater and more efficient than seperate cookies
 		end
 	end
 	if not client.preferences and geo and site.geo ~=false then
@@ -267,7 +266,7 @@ function Signin () -- not declared as action as is a default setup by Starter
 			-- if the site has not disabled it and the user does not have any persisted localisation settings, we persist the current ones providing they don't match the site's defaults (as they'll always be used anyway; albeit not for Teller-originated functions without access to a user-site association)
 			-- TODO: Teller transaction; however this should in most cases only ever be run on a user's first signin (i.e. after first-detection, thereafter they'll be saved onyl when changed from my-account or a locale UI)
 			if request.client.locale ~=site.locale then save(users[user.id].locale, request.client.locale) end
-			if request.client.languages[1] ~=site.language then save(users[user.id].languages, request.client.languages) end
+			if request.client.language ~=site.language then save(users[user.id].languages, request.client.language) end
 			if request.client.timezone then save(users[user.id].timezone, request.client.timezone) end
 		end
 		-- locale, etc. are assigned by Environment() providing this is called before collation, otherwise it must be called explicitly

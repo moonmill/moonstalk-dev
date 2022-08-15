@@ -176,11 +176,38 @@ function Request() -- request can be built in the server, typically by calling t
 	-- # client identification
 	-- this takes place after curation because sites can set their own token names
 	-- where curation wants to include the user, the curator should perform this itself
-	if request.headers.cookie or request.query["≈"] then -- this query argument makes it possible to use a token to sign-in on any URL, but is thus a protected argument name; this is not strictly necessary to support in the generic codebase as is a fairly specific requirement, however the alternative would require using a collator function to perform the check and set the value
+	if request.cookies.token or request.query["≈"] then -- this query argument makes it possible to use a token to sign-in on any URL, but is thus a protected argument name; this is not strictly necessary to support in the generic codebase as is a fairly specific requirement, however the alternative would require using a collator function to perform the check and set the value
 		page.state = 4
+		local client = request.client
+		if site.localise ~=false then
+			-- authentication populates these from the user
+			client.language = client.language or request.cookies.language or site.language
+			client.locale = client.locale or request.cookies.locale or site.locale
+			client.timezone = client.timezone or request.cookies.timezone or site.timezone
+		end
 		request.client.token = request.query["≈"] or request.cookies[site.token_name] -- this indicates a signed-in or previously identified user
 		request.client.id = util.DecodeID(request.client.token) -- matches an existing session ID; failure is silent (eg. if node.secret was changed) or in case of attack, and for protected resources would get caught by locks resulting in unauthorised, otherwise the usual signed-out representation
+	elseif request.cookies.preferences then
+		local client = request.client
+		client.preferences = json.decode(request.cookies.preferences)
+		client.language = client.preferences.language
+		client.locale = client.preferences.locale
+		client.timezone = client.preferences.timezone
+	elseif site.languages then
+		for lang_locale,language,locale in string_gmatch(string_lower( request.headers['accept-language'] ),"[q%A]*((%a*)%-?(%a*))") do
+			if language =="" then break
+			elseif site.vocabulary[language] then -- this is built from translated views, and the site's own vocabulary which must thus declare languages that shall be supported for matching with a client 
+				request.client.language = language
+				if locale and locales[lang_locale_match] then
+					request.client.locale = lang_locale_match
+				elseif locales[locale] then
+					request.client.locale = locale
+				end
+				break
+			end
+		end
 	end
+	-- if token is probably signed in; elseif preferences, else fallback to browserr
 
 	-- # authentication
 	-- this depends upon page.locks which may prevent it, however if a collator wants to perform authentication earlier it may
@@ -204,7 +231,7 @@ function Request() -- request can be built in the server, typically by calling t
 			end
 		end
 		if not unlocked then
-			log.Debug("no key for locks") log.Debug(page.locks)
+			log.Debug("no key for locks: "..util.ListGrammatical(page.locks))
 			scribe.UserUnauthorised()
 		end
 	end
@@ -212,7 +239,8 @@ function Request() -- request can be built in the server, typically by calling t
 	-- # Localisation
 	-- a locale is required by most applications; and is derived from request and user; but may be overridden in sites using localise=false
 	-- a language is required for collators to select localised page content (but should fallback to site default or first available)
-	moonstalk_Environment(request.client,site)
+	log.Debug() if page.vocabulary and lfs.attributes(site.files[page.view..".vocab.lua"].path,"modification") > site.files[page.view..".vocab.lua"].imported then scribe.ImportViewVocabulary(site,site.urns_exact[page.address]) end
+	moonstalk_Environment(request.client, site, page)
 
 
 	-- # Rendering
@@ -313,10 +341,9 @@ function View(path)
 	-- cannot currently ask for a view with a specific translation without changing the request.client.language
 	local view = site.views[path]
 	log.Debug() if not view then return scribe.Error{realm="page",title="Missing view",detail=path} end
-	if page.modified ==nil then page.modified = view.modified end -- best practice is to have a modified date so we use that of the first rendered view, typically the main content, otherwise must be explictly set
 	page.type = view.type
 	if view.translated then -- FIXME:
-		view = view[request.client.language] or view[request.client.locale] or view[request.client.languages[2]] or view[request.client.languages[3]] or view -- the assumption is that the first language contains a locale and is therefore the best match
+		view = view[request.client.language] or view[request.client.locale] or view -- the assumption is that the first language contains a locale and is therefore the best match
 	end
 	page.language = page.language or view.language or site.language -- the only value actually copied from view to page unless it has been defined elsewhere (probably address)
 	log.Debug("running view: "..view.path)
@@ -348,6 +375,7 @@ function View(path)
 		return result
 		--]]
 	end
+	if page.modified ==nil then page.modified = view.modified end -- best practice is to have a modified date so we use that of the first rendered view, typically the main content, otherwise must be explictly set
 end
 scribe_View = View
 function ViewSandbox(path,env)
@@ -467,7 +495,7 @@ function Redirect (url,code)
 	_G.page.cookies = cookies
 	_G.page.headers["Location"] = url
 	log.Debug("redirecting to "..url)
-	_G.output[1] = [[<a href="]],url,[[">Redirected to ]],url,[[</a>]]
+	_G.output = {[[<a href="]],url,[[">Redirected to ]],url,[[</a>]],}
 	return false
 end
 function RedirectSecure (address,code)
@@ -485,7 +513,7 @@ function RedirectSecure (address,code)
 		page.headers["Location"] = table_concat{"https://",site.domain,"/",address}
 	end
 	log.Debug("redirecting to "..page.headers["Location"])
-	_G.output = {[[<a href="]],url,[[">Redirecting to ]],url,[[</a>]],length=1}
+	_G.output = {[[<a href="]],url,[[">Redirecting to ]],url,[[</a>]],}
 	return false
 end
 
@@ -790,6 +818,8 @@ function Site(site)
 	if site.token_cookie then site.token_name = site.token_cookie.name end
 	site.token_name = site.token_name or "token"
 
+	if site.languages then keyed(site.languages) end -- when a site supports all languages then languages=moonstalk.languages 
+
 	site.domains = site.domains or {{name=site.domain}} -- may come from settings, else need a default
 	-- point each domain (alias) at its site
 	for i,domain in ipairs(site.domains) do
@@ -905,7 +935,6 @@ function EnableSiteApplication(bundle,name,dependent)
 				urn = copy(urn) -- because site values need to be propagated into it
 				if replace then log.Info("  "..urnname .. " replaced by "..application.id) end
 				if bundle.secure and urn.secure ==nil then urn.secure = true end -- propogate the secure flag to the apps urn
-				if bundle.polyglot and urn.polyglot==nil then urn.polyglot = true end
 				bundle.urns_exact[urnname] = urn
 			end
 		end
@@ -914,7 +943,6 @@ function EnableSiteApplication(bundle,name,dependent)
 		urn = copy(urn)
 		if bundle.secure and urn.secure ==nil then urn.secure = true end -- propogate the secure flag to the apps urn
 		if bundle.authenticator and urn.authenticator ==nil then urn.authenticator = bundle.authenticator end -- propogate -- NOTE: we do not replace an application specified one
-		if bundle.polyglot ~=nil and urn.polyglot==nil then urn.polyglot = true end
 		bundle.urns_patterns[#bundle.urns_patterns+1] = urn
 	end
 	copy(application.controllers, bundle.controllers, false, false)
@@ -1231,6 +1259,7 @@ function TranslateView (data,view)
 	-- rewrite our macro tags
 	data = string.gsub(data, "%?(%b())", "\5%1\5") -- can't capture the contents alone, so a two-fold gsub using control chars is simplest
 	data = string.gsub(data, "\5%((.-)%)\5","<?= %1 ?>")
+	-- TODO: rewrite l.term in macro tags to vocab1[term] or vocab2[term] as it will avoid the metatable lookup, however we'll need access to vocab1 as a global
 --[=[ -- TODO: inline ifthen to avoid evaluating both ifthen values and the functional call; the following doesn't handle values that are function calls with multiple arguments, which would need parsing that iterates through the captured string
 	function(capture)
 		local count
@@ -1247,7 +1276,7 @@ function TranslateView (data,view)
 --]=]
 
 	-- rewrite code blocks and create the main output function
-	local body = {"local l=l;local L=L;"} -- NOTE: output cannot be a local as it is reassigned within the scribe environment -- we use a length attribute in the table to improve append performance, as the #length operator traverses the array part each time; however most pages have a fairly limited number of string components thus this is minimaly notable only when many dynamic values are assemabled; there are nonetheless three global looks required in order to complete each value appended which is still cheaper than a traversal or function call; we cannot further optimise due to external calls being able to also append to the output, thus using a local for the length is not possible
+	local body = {"local l=l;local L=L;"} -- NOTE: output cannot be a local as it is reassigned within the scribe environment -- we use a length attribute in the table to improve append performance, as the #length operator traverses the array part each time; however most pages have a fairly limited number of string components thus this is minimaly notable only when many dynamic values (translations) are assemabled; there are nonetheless three global lookups required in order to complete each value appended which is still cheaper than a traversal or function call; we cannot further optimise due to external calls being able to also append to the output, thus using a local for the length is not possible
 	local start = 1 -- start of untranslated part in `s'
 	while true do
 		local startOffset, endOffset, isExpression, code = string.find(data, "<%?[lua]*[ \t]*(=?)(.-)%?>", start)
@@ -1315,6 +1344,27 @@ function LoadView(view)
 
 	return view,err
 end
+function ImportViewVocabulary(site,address) -- TODO: invoke on file change; remove hack from loadview
+	local file = address.view..".vocab.lua"
+	local path = site.path.."/"..file
+	if not util.FileExists(path) then return end
+	address.vocabulary = address.vocabulary or {}
+	log.Debug("  importing "..address.view..".vocab")
+
+	-- the following is an analog of moonstalk.ImportVocabulary
+	site.files[file].imported = now
+	address.vocabulary.vocabulary = address.vocabulary -- this is available so that long-form keys can be declared with the full-form syntax of vocabulary['en-gb'].key_name
+	setmetatable(address.vocabulary, {__index=function(table, key) local value = rawget(table,key) if not value then value = {} rawset(table,key,value) end return value end}) -- adds language subtables ondemand -- TODO: if not value and languages[key]
+	local imported,err = util.ImportLuaFile(path,address.vocabulary,function(code)return string.gsub(code,"\n%[","\nvocabulary[")end) -- translates ['en-gb'].key_name long-form declarations to vocabulary['en-gb'].key_name
+	if err then moonstalk.BundleError(site,{realm="bundle",title="Error loading vocabulary",detail=err}) end
+	setmetatable(address.vocabulary, nil)
+	address.vocabulary.vocabulary = nil
+
+	for lang in pairs(address.vocabulary) do
+		site.vocabulary[lang] = site.vocabulary[lang] or {} -- languages the site uses
+	end
+end
+
 
 -- controller functions
 
@@ -1407,7 +1457,7 @@ function ConfigureBundle(bundle,kind)
 				-- TODO: handle translated images (name.language.format)
 				file.imported = 0
 				file.modified = 0 -- lfs.attributes(file.path,"modification") -- not currently needed for all files and would slow startup, the only place it's needed is on controllers and views which add it in those routines
-				if file.type=="lua" and subfolder ~="include" and not exclude[merged_uri] then -- TODO: break out into file format handlers
+				if file.type=="lua" and subfolder ~="include" and not exclude[merged_uri] and string.sub(file.file,-9) ~="vocab.lua" then -- TODO: break out into file format handlers -- NOTE: page vocabularies are loaded by addresses that have a language specified, as there's no way to route to a language specific page except through specified addresses
 					-- a controller; not mapped to a url; cannot be translated
 					local controller,err = scribe.LoadController(file)
 					if controller then
@@ -1436,6 +1486,7 @@ function ConfigureBundle(bundle,kind)
 								if not file[string.sub(language,1,2)] then view[string.sub(language,1,2)] = view[language] end
 								if not file[string.sub(language,4,5)] then view[string.sub(language,4,5)] = view[language] end -- NOTE: this has problems if both fr and ca-fr are defined as the canadian variant might become the default for french and/or france, however it is recommended that if localised variants are being used, that they must be specified fully in all cases, e.g. use ca-fr and fr-fr, the generic 'fr' version will then be random unless also otherwise specified
 							end
+							site.vocabulary[language] = site.vocabulary[language] or {}
 							util.ArrayAdd(bundle.translated, language)
 							view.translated = true
 						end
@@ -1446,7 +1497,9 @@ function ConfigureBundle(bundle,kind)
 						local address = util.NormaliseUri(file.uri, {"/"}) -- TODO: filenames on OS X (via util.Shell) have a different Unicode byte sequence to that of an addresses received from WSAPI therefore Unicode file names are not supported with autoaddresses at present
 						local canonical
 						if file.uri~=address then canonical = "/"..file.uri end
-						table.insert(bundle.addresses, {matches=address, view=file.id, canonical=canonical}) -- does not check if translations share an address, resulting in multiples, but during urn mapping assignment these will overwite each other
+						if not util.AnyTableHasKeyValue(bundle.addresses,"matches",file.id) then
+							table.insert(bundle.addresses, {matches=address, view=file.id, canonical=canonical})
+						end
 						counts.addresses = counts.addresses +1
 					end
 					-- TODO: configure bundle will be deprecated in favour of post app-loading, these routines should thus be moved to an app FileLoader declaration
@@ -1485,7 +1538,6 @@ function ConfigureBundle(bundle,kind)
 		if bundle.locks and urn.locks ==nil then urn.locks = bundle.locks end -- this allows a site or app to lock all its addresses, except those that explictly set locks=false
 		if urn.collator then urn.collate = scribe.GetTablePath(urn.collator) end
 
-		if urn.polyglot ==nil and (site.polyglot or node.polyglot) then urn.polyglot = true end
 		-- convert view and controller names to be unique (bundle-specific)
 		-- convert key syntax to patterns
 		if urn.matches then
@@ -1500,6 +1552,12 @@ function ConfigureBundle(bundle,kind)
 					bundle.urns_exact[match] = urn
 				end
 				branch.matches = nil
+				if branch.language and branch.view then
+					localised[urn.view] = localised[branch.view] or {}
+					branch.vocabulary = localised[branch.view]
+					scribe.ImportViewVocabulary(bundle,urn)
+					if branch.vocabulary[branch.language] then branch.vocabulary[branch.language].page_address = match end -- just in case it failed to load
+				end
 			end
 		else
 			table.insert(bundle.urns_patterns,urn)

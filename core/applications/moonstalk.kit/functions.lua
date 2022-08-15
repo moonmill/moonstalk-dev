@@ -1315,7 +1315,7 @@ function Editor ()
 	table_insert(script, "var client=")
 	table_insert(script, json.encode{
 		locale = request.client.locale,
-		languages = request.client.languages,
+		language = request.client.language,
 	})
 	table_insert(script, '\n')
 
