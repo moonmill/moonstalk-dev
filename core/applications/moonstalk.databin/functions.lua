@@ -15,12 +15,16 @@ WARNING: if permissions prevent saving files to data/ the tables will be lost at
 TODO: test other serialisation libraries for loading speed
 --]]
 
+-- TODO: elevator function to check the config and warn when a table will not autosave
+
 require"luabins"
 managing = 0 -- count of managed tables
 
 local luabins_save = luabins.save
 function Save(name,data)
 	local result,err
+	data = data or db[name]
+	if not data then moonstalk.Error{databin, level="Priority", title="No data to save to table "..name} end
 	data,err = luabins_save(data)
 	if err then return moonstalk.Error{databin, level="Priority", title="Error encoding "..name, detail=err} end
 	result,err = util.FileSave("data/"..name..".luabins", data)
@@ -100,9 +104,13 @@ function Starter()
 	for name,table in pairs(moonstalk.databases.tables) do
 		table.system = table.system or "databin"
 		table.autosave = table.autosave or autosave_default
-		if table.system =="databin" then
+		if table.system =="databin" and (not table.autoload or util.ArrayContainsValue(table.autoload, moonstalk.server)) then
 			databin.managing = databin.managing +1
-			if table.autosave ==moonstalk.server then databin.autosave = true end
+			if table.autosave ==moonstalk.server then
+				databin.autosave = true
+			else
+				-- TODO: watch the file and if it changes reload it
+			end
 			local data,error = databin.Load(name,true) or {}
 			if error then
 				moonstalk.BundleError(databin, {databin, log.Priority, title="Cannot load table '"..name.."'", detail=error})
@@ -140,10 +148,10 @@ function Shutdown()
 			if _G.db[name] and table.autosave ==moonstalk.server and node[table.autosave] and (node[table.autosave].instances or 1) ==1 then
 				count = count +1
 				databin.Save(name, _G.db[name])
-			elseif not table.autosave ==moonstalk.server then
-				log.Info("Saving table "..name.." not enabled with this server")
-			else
+			elseif not table.autosave then
 				log.Notice("Saving table "..name.." deactivated")
+			else
+				log.Info("Saving table "..name.." not enabled with this server")
 			end
 		end
 	end

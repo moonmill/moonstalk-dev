@@ -19,6 +19,7 @@ _G.time = {
 	minute = 60,
 	hour = 3600,
 	day = 86400,
+	week = 604800,
 	month = 2419200, -- lunar
 	year = 29030400, -- lunar
 }
@@ -1824,9 +1825,14 @@ function InsertOrderedTablesAfter(value,comparator,into,after)
 	table_insert(into,position,value)
 end
 
+function AnyTableHasKeyValue(tables,key,value)
+	for _,record in pairs(tables) do
+		if record[attribute] ==value then return true end
+	end
+end
 function FindKeyValueInTable(attribute,value,items,max)
 	local results = {}
-	for _,record in pairs(items or {}) do
+	for _,record in pairs(items) do
 		if record[attribute] == value then table_insert(results,record) if max and #results >= max then break end end
 	end
 	if #results == 0 then return end

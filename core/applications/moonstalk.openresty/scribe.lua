@@ -1,3 +1,4 @@
+-- REFACTOR: use scribe.lua
 -- NOTE: the _G.now timestamp is only updated upon a new request, therefore any function not invoked directly from the request cycle must instead call ngx.now()
 -- WARNING: any function that calls an async operation MUST use moonstalk.Resume(function,…) which preserves and restore the global Moonstalk tables that change with every request (notably the request table itself), and so if they are to be consumed after a possible yield (request context change such as a database call), the use of moonstalk.Resume is required to preserve the context, and simply restores these tables after such context changes (albeit at a small cost)
 -- WARNING: failure to use moonstalk.Resume but instead directly call an async function then use values from session globals request/session/user/etc WILL result in these referencing a different request/session/user/etc, thus resulting in a dangerous situation in which you will consume or leak the wrong data
@@ -196,7 +197,7 @@ function _Request()
 		scheme =ngx.var.scheme, -- protocol http or https
 		secure =ngx.var.scheme=="https",
 		agent =ngx.var.http_user_agent or "", -- not always present
-		client = {ip=ngx.var.remote_addr, languages={}, keychain={}},
+		client = {ip=ngx.var.remote_addr, keychain={}},
 		cookies= {},
 		-- form is specified in scribe as EMPTY_TABLE, then replaced by GetPost when required
 		headers =ngx_req_get_headers(), -- transforms to lowercase but also provides a metatable to handle mixedcase and underscore variants -- TODO: use a metatable that only fetches from ngx.var[name] but has to transform dashes to underscore
