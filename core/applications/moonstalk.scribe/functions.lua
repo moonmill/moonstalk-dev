@@ -1556,7 +1556,8 @@ function ConfigureBundle(bundle,kind)
 					localised[urn.view] = localised[branch.view] or {}
 					branch.vocabulary = localised[branch.view]
 					scribe.ImportViewVocabulary(bundle,urn)
-					if branch.vocabulary[branch.language] then branch.vocabulary[branch.language].page_address = match end -- just in case it failed to load
+					vocabulary[branch.language] = vocabulary[branch.language] or {}
+					vocabulary[branch.language]["address:"..branch.view] = match
 				end
 			end
 		else

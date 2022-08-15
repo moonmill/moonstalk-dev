@@ -8,8 +8,8 @@ local address,query
 if request.headers.referer then
 	address,query = util.NormaliseUri(string.match(request.headers.referer, "//.-/([^?]+)(.*)"),{"/"})
 	address = site.urns_exact[address]
-	if address and address.vocabulary[language] then
-		address = address.vocabulary[language].page_address
+	if address and vocabulary[language]["address:"..address.view] then
+		address = address.vocabulary[language]["address:"..address.view]
 	else
 		address = "" -- front page
 	end
