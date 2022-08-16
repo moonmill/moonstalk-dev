@@ -179,12 +179,7 @@ function Request() -- request can be built in the server, typically by calling t
 	if request.cookies.token or request.query["≈"] then -- this query argument makes it possible to use a token to sign-in on any URL, but is thus a protected argument name; this is not strictly necessary to support in the generic codebase as is a fairly specific requirement, however the alternative would require using a collator function to perform the check and set the value
 		page.state = 4
 		local client = request.client
-		if site.localise ~=false then
-			-- authentication populates these from the user
-			client.language = client.language or request.cookies.language or site.language
-			client.locale = client.locale or request.cookies.locale or site.locale
-			client.timezone = client.timezone or request.cookies.timezone or site.timezone
-		end
+		-- authentication populates language.locale,timezone else defaults to the site
 		request.client.token = request.query["≈"] or request.cookies[site.token_name] -- this indicates a signed-in or previously identified user
 		request.client.id = util.DecodeID(request.client.token) -- matches an existing session ID; failure is silent (eg. if node.secret was changed) or in case of attack, and for protected resources would get caught by locks resulting in unauthorised, otherwise the usual signed-out representation
 	elseif request.cookies.preferences then
@@ -193,21 +188,23 @@ function Request() -- request can be built in the server, typically by calling t
 		client.language = client.preferences.language
 		client.locale = client.preferences.locale
 		client.timezone = client.preferences.timezone
-	elseif site.languages then
+	elseif site.vocabulary then
+		local client = request.client
 		for lang_locale,language,locale in string_gmatch(string_lower( request.headers['accept-language'] ),"[q%A]*((%a*)%-?(%a*))") do
 			if language =="" then break
-			elseif site.vocabulary[language] then -- this is built from translated views, and the site's own vocabulary which must thus declare languages that shall be supported for matching with a client 
-				request.client.language = language
+			elseif site.vocabulary[language] then -- this is built from translated views, and the site's own vocabulary, so must define languages that shall be supported for matching with a client; client.language will thus never be an unsupported value and cannot be used for profiling
+				client.language = language
 				if locale and locales[lang_locale_match] then
-					request.client.locale = lang_locale_match
+					client.locale = lang_locale_match
 				elseif locales[locale] then
-					request.client.locale = locale
+					client.locale = locale
 				end
 				break
 			end
 		end
+		client.language = client.language or site.language
 	end
-	-- if token is probably signed in; elseif preferences, else fallback to browserr
+
 
 	-- # authentication
 	-- this depends upon page.locks which may prevent it, however if a collator wants to perform authentication earlier it may
@@ -235,6 +232,7 @@ function Request() -- request can be built in the server, typically by calling t
 			scribe.UserUnauthorised()
 		end
 	end
+
 
 	-- # Localisation
 	-- a locale is required by most applications; and is derived from request and user; but may be overridden in sites using localise=false

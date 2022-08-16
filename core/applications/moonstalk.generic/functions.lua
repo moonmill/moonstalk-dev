@@ -169,9 +169,9 @@ function SetSession(session,err)
 	client.ip = serverclient.ip
 		-- the follow prefer user values (i.e. persistent settings) but preserve client values (i.e. browser dervived values)
 	-- TODO: support per-domain defaults instead of per-site (e.g. *.co.uk or uk.* locale=uk)
-	client.language = user.language
-	client.locale = user.locale
-	client.timezone = user.timezone
+	client.language = user.language or site.language
+	client.locale = user.locale or site.locale
+	client.timezone = user.timezone or site.timezone
 	client.keychain = user.keychain or EMPTY_TABLE
 	if user and not user.token then user.token = util.EncodeID(user.id) end -- OPTIMIZE: this should be done on demand using a metatable call e.g. local token = user.token or user.token()
 	if now > client.seen +time.hour*8 then

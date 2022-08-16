@@ -893,10 +893,10 @@ end
 -- TODO: in dev mode show (e.g. with title attibute) where terms are defined; create an index of files and the terms defined in them in the order they are replaced (if multiple)
 -- OPTIMIZE: pre-render views for each declared language (for an address? or perhaps by inheriting to the view with a <? languages = declaration, requring a metatable on its enviornment during initialisation ?> ) replacing calls to l.* with the term, this avoiding the overhead of a metatable call, function invocation and table lookup for each term
 do
-local vocab1,vocab2,vocab3 --,vocab4,vocab5
+local vocab1,vocab2 --,vocab3,vocab4,vocab5
 local util_Capitalise = util.Capitalise
-function moonstalk.translate(_,term) return vocab1[term] or vocab2[term] or vocab3[term] end
-function moonstalk.Translate(_,term) return util_Capitalise( vocab1[term] or vocab2[term] or vocab3[term] ) end
+function moonstalk.translate(_,term) return vocab1[term] or vocab2[term] end -- OPTIMISE: in the scribe this should use local voacab and inline instead of metatable func call
+function moonstalk.Translate(_,term) return util_Capitalise( vocab1[term] or vocab2[term] ) end
 function moonstalk.Debug_translate(_,term) return vocab1[term] or vocab2[term] or "⚑"..(term or "UNDEFINED") end -- TODO: this behaviour is significantly different from production as that will throw errors for nil values or fail to concatenate output, thus may be better to remove and instead compile all use of l.* l[*] etc and compare against available keys, to provide a report
 function moonstalk.Debug_Translate(_,term) return util_Capitalise(_G.vocab1[term] or vocab2[term] or "⚑"..(term or "UNDEFINED")) end
 
@@ -924,71 +924,21 @@ _G.L = {} -- Intial cap version of l
 setmetatable(_G.l,{__index=moonstalk.translate, __call=moonstalk.plural})
 setmetatable(_G.L,{__index=moonstalk.Translate, __call=moonstalk.Plural})
 
-local util_Match = util.Match
 local unpopulated = EMPTY_TABLE
 local vocabulary = _G.vocabulary
---[[
-local last_environment
-function moonstalk.Polyglot(languages,tenant)
-	-- this function used to be used from Envionrment to inspect dynamically attributed languages and pick amongst them, but is no longer required as a collator is expected to define a single language value to use
-	-- defines the environment with vocabularies (translations) that match the languages, which should contain defaults last as vocabularies may be incomplete; we do not guarantee that the preferred (earliest) language will be always be used and may fallback to another, however the first specified languages should have a good probability of existing and all should be limited to only supported langauges
-	-- supports per-tenant vocabulary modifications such as in a site on a multi-tenanted application, these always take precedence, however should always match available vocabularies less translations use modified terms in the site modifications above those in a root language, it is up to the server to ensure a match and only provide languages that can match
-	-- tenant is interchangable with site; when using tenant.vocabulary, the calling function should ensure client.language has a corresponding value, else it may not be used, typically this would be done by only offering preferences being one of its supported vocabularies
-	-- TODO: test performance using the current 'or' syntax, metatables, or merge of all terms together in a single table upon each request (as originally)
-	-- NOTE: vocabulary.langid._id must exist (this is added when bundles are loaded); Environment() defines the available vocabularies
-	-- it is assumed that the specified languages exists (argument in  and tenant/site), thus where they don't the fallbacks are not unduly expensive
-	-- using the 5-case translate functions has no notable additional cost, but might be better handled by changing them in the metatable and thus also not setting the extra upvalues here
-	-- TODO: match based on culture first e.g. en-gb pt-br then, generic; we already map a non-cultured language from a cultured one if the non-cultured is not specified
-
-	-- site[client], client1, client2, client3, site, node
-	languages = languages or request.client.languages
-	if languages == last_environment then return end
-	last_environment = languages
-	local vocabularies = {}
-	if tenant.vocabulary then
-		-- we only use one matched language from a site's vocabularies, thus a site should have a fully defined vocabulary for each of its languages
-		vocabularies[1] = tenant.vocabulary[ util_Match(languages,tenant.vocabulary) ] -- if there isn't a match this will be nil and will instead be set to a matched global vocabulary below; request.client.languages includes the site default language thus we generally don't need an additional fallback for it
-	end
-	-- define only vocabularies that are available
-	local count = 0
-	for _,language in ipairs(languages) do
-		if vocabulary[language] then
-			vocabularies[#vocabularies+1] = vocabulary[language]
-			count = count +1
-			if #vocabularies ==3 then break end -- if a site language matched, then only two slots are provided for vocabularies from them
-		end
-	end
-	vocab1 = vocabularies[1] or or unpopulated
-	vocab2 = vocabularies[2] or unpopulated
-	vocab3 = vocabularies[3] or unpopulated
-	vocab4 = vocabularies[4] or unpopulated
-	vocab5 = vocabularies[node.language]
-	return languages -- the probable language in use, assuming all terms are defined in the vocabulary; we could conceivably record which vocabularies are used for term each time one is requested, and if not consitent with request.client.language then set request.client.polyglot=true and request.client.language = nil (added to the page in the scribe at end of request), hower this would be extra overhead in the translate functions
-end
---]]
-
 function moonstalk.Environment(client, tenant, content)
-	-- establishes normalised moonstalk globals, currently this only applies to locale and translations
-	-- client may be passed as a table providing values to use for language, locale and timezone, else those in tenant will be used; client may thus be any table with values to use for these which should be valid; tenant is only required if the client values may not be valid
-	-- not strictly necessary if node is only serving static pages, all sites share the same language, and clients cannot set preferences, however fairly low cost thus standard in servers handling user configurable requests
+	-- establishes normalised moonstalk settings, currently this only applies to locale and translations and must be called upon any change to the consuming client
+	-- client must be passed as a table providing optional values to use for language, locale and timezone, else those in tenant will be used; node is an adequate fallback for tenant if client deos not have all these values
+	-- all values are expected to be valid, i.e. must exist
+	-- the scribe ensures client always has language, either from user or browser detected and matching the site, but defaulting to site/tenant language, however other environments may not so here we default to the tenant values regardless
+	-- not strictly necessary if node is only serving static pages, as all sites share the same language, and clients cannot set preferences, however fairly low cost thus standard in servers handling user configurable requests and as localised functions may nonetheless be called for formatting
 	_G.locale = locales[client.locale] or locales[tenant.locale]
 	if content and content.vocabulary then
-		vocab1 = content.vocabulary[content.language] or content.vocabulary[client.language] or content.vocabulary[tenant.language]
-		if not tenant.vocabulary then
-			vocab2 = vocabulary[client.language] or vocabulary[tenant.language]
-			vocab3 = unpopulated
-		else
-			vocab2 = tenant.vocabulary[client.language] or tenant.vocabulary[tenant.language]
-			vocab3 = vocabulary[client.language] or vocabulary[tenant.language]
-		end
-	elseif not tenant.vocabulary then
-		vocab1 = vocabulary[client.language] or vocabulary[tenant.language]
-		vocab2 = unpopulated
-		vocab3 = unpopulated
+		vocab1 = content.vocabulary[content.language or client.language or tenant.language] -- this means content will always use it's own defined language vocabulary
+		vocab2 = vocabulary[client.language or tenant.language] -- but we fallback to the client-defined for any other uses
 	else
-		vocab1 = tenant.vocabulary[client.language] or vocabulary[tenant.language]
-		vocab2 = vocabulary[tenant.language]
-		vocab3 = unpopulated
+		vocab1 = vocabulary[client.language or tenant.language]
+		vocab2 = unpopulated -- there is no fallback because all vocabularies are expected to be fully populated and valid
 	end
 	-- TODO: add timezone; can't really use client.timezone as the table pointer as it's conditional but we need and easy-to-reference table that falls back: timezones[request.client.timezone or site.timezone] or locale.timezone
 end
