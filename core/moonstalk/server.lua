@@ -896,7 +896,7 @@ do
 local vocab1,vocab2 --,vocab3,vocab4,vocab5
 local util_Capitalise = util.Capitalise
 function moonstalk.translate(_,term) return vocab1[term] or vocab2[term] end -- OPTIMISE: in the scribe this should use local voacab and inline instead of metatable func call
-function moonstalk.Translate(_,term) return util_Capitalise( vocab1[term] or vocab2[term] ) end
+function moonstalk.Translate(_,term) return util_Capitalise( vocab1[term] or vocab2[term] or term ) end
 function moonstalk.Debug_translate(_,term) return vocab1[term] or vocab2[term] or "⚑"..(term or "UNDEFINED") end -- TODO: this behaviour is significantly different from production as that will throw errors for nil values or fail to concatenate output, thus may be better to remove and instead compile all use of l.* l[*] etc and compare against available keys, to provide a report
 function moonstalk.Debug_Translate(_,term) return util_Capitalise(_G.vocab1[term] or vocab2[term] or "⚑"..(term or "UNDEFINED")) end
 

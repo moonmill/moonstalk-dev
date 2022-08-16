@@ -1014,18 +1014,16 @@ function Unknown()
 end
 
 function Abandon() end -- placeholder during intialisation
-do local function RenderAbandon(what,name,object)
+do local function RenderAbandon(name,object)
 	if not object then
-		page.abandoned ={"Couldn't abandon to missing "..what..": "..name}
-		scribe.Error(page.abandoned)
+		scribe.Error("Couldn't abandon to missing view: "..name)
 		return false
 	elseif object.static then
-		page.abandoned = object.static
+		write(object.static)
 	else
 		local result,response = pcall(object.loader)
 		if not result then
-			page.abandoned ={"Couldn't abandon due to error in "..what..": "..object.id.." "..response}
-			scribe.Error(page.abandoned)
+			scribe.Error("Couldn't abandon due to error in view: "..object.id.." "..response)
 			return false
 		end
 	end
@@ -1035,16 +1033,16 @@ function AbandonedEditor()
 	page.sections = {output="content",content={"",length=1}}
 	_G.output = page.sections.content
 	-- generic views and templates are expected to not fail, thus we fall back to them in case they have been overridden
-	if RenderAbandon("view",page.abandoned, site.views[page.abandoned]) ==false then
-		page.section.content={"",length=1}
+	if RenderAbandon(page.abandoned, site.views[page.abandoned]) ==false then
+		page.sections.content={"",length=1}
 		_G.output = page.sections.content
-		RenderAbandon("view",page.abandoned, generic.views[page.abandoned])
+		RenderAbandon(page.abandoned, generic.views[page.abandoned])
 	end
 	scribe.Section"template"
-	if RenderAbandon("view","template", site.views["template"] or site.views["generic/template"]) ==false then
+	if RenderAbandon("template", site.views["template"] or site.views["generic/template"]) ==false then
 		page.sections.template={"",length=1}
 		_G.output = page.sections.template
-		RenderAbandon("view","template", generic.views.template)
+		RenderAbandon("template", generic.views.template)
 	end
 	_G.output = table.concat(_G.output)
 end
