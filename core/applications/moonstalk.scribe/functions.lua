@@ -237,7 +237,7 @@ function Request() -- request can be built in the server, typically by calling t
 	-- # Localisation
 	-- a locale is required by most applications; and is derived from request and user; but may be overridden in sites using localise=false
 	-- a language is required for collators to select localised page content (but should fallback to site default or first available)
-	log.Debug() if page.vocabulary and lfs.attributes(site.files[page.view..".vocab.lua"].path,"modification") > site.files[page.view..".vocab.lua"].imported then scribe.ImportViewVocabulary(site,site.urns_exact[page.address]) end
+	log.Debug() if page.vocabulary and lfs.attributes(site.files[page.view..".vocab.lua"].path,"modification") > site.files[page.view..".vocab.lua"].imported then scribe.ImportViewVocabulary(site,site.urns_exact[page.address],true) end
 	moonstalk_Environment(request.client, site, page)
 
 
@@ -1342,10 +1342,10 @@ function LoadView(view)
 
 	return view,err
 end
-function ImportViewVocabulary(site,address) -- TODO: invoke on file change; remove hack from loadview
+function ImportViewVocabulary(site,address,reload) -- TODO: invoke on file change; remove hack from loadview
 	local file = address.view..".vocab.lua"
 	local path = site.path.."/"..file
-	if not util.FileExists(path) then return end
+	if not util.FileExists(path) or (not reload and site.files[file].imported) then return end
 	address.vocabulary = address.vocabulary or {}
 	log.Debug("  importing "..address.view..".vocab")
 
