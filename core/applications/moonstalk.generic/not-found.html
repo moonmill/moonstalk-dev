@@ -5,6 +5,7 @@ local notfound = page.address or "" ?>
 <div class="content">
 <div class="section">
 <h1>?(l.notfound_head)</h1>
+<!-- TODO: translate-->
 <p>We're sorry, but there's no
 <? if notfound ~= 'front' then ?>page « ?(notfound) » that <? if not request.referrer then ?>you requested<? elseif request.domain==site.domain or util.ParentKeyValue(site.domains,"name",request.domain) then ?>we linked you to<? else ?>you were linked to<? end ?><? else ?>front page<? end ?><? if request.referrer then ?> on this site <nobr>« ?(request.domain) »</nobr><? else ?> here<? end ?>.
 ?(l.notfound_body)
