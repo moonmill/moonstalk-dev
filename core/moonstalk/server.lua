@@ -893,12 +893,12 @@ end
 -- TODO: in dev mode show (e.g. with title attibute) where terms are defined; create an index of files and the terms defined in them in the order they are replaced (if multiple)
 -- OPTIMIZE: pre-render views for each declared language (for an address? or perhaps by inheriting to the view with a <? languages = declaration, requring a metatable on its enviornment during initialisation ?> ) replacing calls to l.* with the term, this avoiding the overhead of a metatable call, function invocation and table lookup for each term
 do
-local vocab1,vocab2 --,vocab3,vocab4,vocab5
+local vocab1,vocab2,vocab3 --,vocab4,vocab5
 local util_Capitalise = util.Capitalise
-function moonstalk.translate(_,term) return vocab1[term] or vocab2[term] end -- OPTIMISE: in the scribe this should use local voacab and inline instead of metatable func call
-function moonstalk.Translate(_,term) return util_Capitalise( vocab1[term] or vocab2[term] or term ) end
-function moonstalk.Debug_translate(_,term) return vocab1[term] or vocab2[term] or "⚑"..(term or "UNDEFINED") end -- TODO: this behaviour is significantly different from production as that will throw errors for nil values or fail to concatenate output, thus may be better to remove and instead compile all use of l.* l[*] etc and compare against available keys, to provide a report
-function moonstalk.Debug_Translate(_,term) return util_Capitalise(_G.vocab1[term] or vocab2[term] or "⚑"..(term or "UNDEFINED")) end
+function moonstalk.translate(_,term) return vocab1[term] or vocab2[term] or vocab3[term] end -- OPTIMISE: in the scribe this should use local voacab and inline instead of metatable func call
+function moonstalk.Translate(_,term) return util_Capitalise( vocab1[term] or vocab2[term] or vocab3[term] or term ) end
+function moonstalk.Debug_translate(_,term) return vocab1[term] or vocab2[term] or vocab3[term] or "⚑"..(term or "UNDEFINED") end -- TODO: this behaviour is significantly different from production as that will throw errors for nil values or fail to concatenate output, thus may be better to remove and instead compile all use of l.* l[*] etc and compare against available keys, to provide a report
+function moonstalk.Debug_Translate(_,term) return util_Capitalise(_G.vocab1[term] or vocab2[term] or vocab3[term] or "⚑"..(term or "UNDEFINED")) end
 
 local languages = languages
 function moonstalk.plural(_,term,number)
@@ -906,6 +906,8 @@ function moonstalk.plural(_,term,number)
 		return languages[vocab1._id].plurals (vocab1[term],number)
 	elseif vocab2[term] and languages[vocab2._id].plurals then
 		return languages[vocab2._id].plurals (vocab2[term],number)
+	elseif vocab3[term] and languages[vocab3._id].plurals then
+		return languages[vocab3._id].plurals (vocab3[term],number)
 	else
 		return moonstalk.translate(nil,term)
 	end
@@ -928,19 +930,33 @@ local unpopulated = EMPTY_TABLE
 local vocabulary = _G.vocabulary
 function moonstalk.Environment(client, tenant, content)
 	-- establishes normalised moonstalk settings, currently this only applies to locale and translations and must be called upon any change to the consuming client
-	-- client must be passed as a table providing optional values to use for language, locale and timezone, else those in tenant will be used; node is an adequate fallback for tenant if client deos not have all these values
-	-- all values are expected to be valid, i.e. must exist
+	-- utilises an optional content-realm assigned vocabulary, then a tenant defined realm before finally fallingback to the global shared vocabulary realm
+	-- a content realm may support a language not otherwise supported
+	-- a page controller, curator or collator may set content.language in order to support other case specific languages such as dervived from routing
+	-- client must be passed as a table providing optional values to use for language, locale and timezone, else those in tenant will be used; node is an adequate fallback for tenant if client deos not have all these values, however an envionrment may already have set client to a defaul such as tenant (site)
+	-- all values are expected to be valid, i.e. must exist as defined languages
 	-- the scribe ensures client always has language, either from user or browser detected and matching the site, but defaulting to site/tenant language, however other environments may not so here we default to the tenant values regardless
 	-- not strictly necessary if node is only serving static pages, as all sites share the same language, and clients cannot set preferences, however fairly low cost thus standard in servers handling user configurable requests and as localised functions may nonetheless be called for formatting
 	_G.locale = locales[client.locale] or locales[tenant.locale]
-	if content and content.vocabulary then
-		vocab1 = content.vocabulary[content.language or client.language or tenant.language] -- this means content will always use it's own defined language vocabulary
-		vocab2 = vocabulary[client.language or tenant.language] -- but we fallback to the client-defined for any other uses
+	local language
+	if (not content or not content.vocabulary) and not tenant.vocabulary then
+		language = client.language or tenant.language
+		vocab1 = vocabulary[language]
+		vocab2 = unpopulated
+		vocab3 = unpopulated
+	elseif not content or not content.vocabulary then 
+		language = client.language or tenant.language
+		vocab1 = tenant.vocabulary[language]
+		vocab2 = vocabulary[language]
+		vocab3 = unpopulated
 	else
-		vocab1 = vocabulary[client.language or tenant.language]
-		vocab2 = unpopulated -- there is no fallback because all vocabularies are expected to be fully populated and valid
+		language = content.language or client.language or tenant.language
+		vocab1 = content.vocabulary[language]
+		vocab2 = tenant.vocabulary[language]
+		vocab3 = vocabulary[language]
 	end
 	-- TODO: add timezone; can't really use client.timezone as the table pointer as it's conditional but we need and easy-to-reference table that falls back: timezones[request.client.timezone or site.timezone] or locale.timezone
+	return language
 end
 end
 
@@ -969,11 +985,11 @@ function moonstalk.ImportVocabulary(bundle) -- TODO: invoke on file change; remo
 	-- unlike settings, vocabularies have no access to the global environment
 	if not bundle.files["vocabulary.lua"] then return end
 	bundle.vocabulary = bundle.vocabulary or {}
-	log.Debug("  importing "..bundle.id.."/vocabulary")
+	log.Debug("  vocabulary")
 	bundle.files["vocabulary.lua"].imported = now
 	bundle.vocabulary.vocabulary = bundle.vocabulary -- this is available so that long-form keys can be declared with the full-form syntax of vocabulary['en-gb'].key_name
 	setmetatable(bundle.vocabulary, {__index=function(table, key) local value = rawget(table,key) if not value then value = {} rawset(table,key,value) end return value end}) -- adds language subtables ondemand -- TODO: if not value and languages[key]
-	local imported,err = util.ImportLuaFile(bundle.path.."/vocabulary.lua",bundle.vocabulary,function(code)return string.gsub(code,"\n%[","\nvocabulary[")end) -- translates ['en-gb'].key_name long-form declarations to vocabulary['en-gb'].key_name
+	local imported,err = util.ImportLuaFile(bundle.path.."/vocabulary.lua",bundle.vocabulary,function(code)return string.gsub(code,"\n%[","\nvocabulary[")end) -- translates ['en-gb'].key_name long-form declarations to _vocabulary['en-gb'].key_name
 	if err then moonstalk.BundleError(site,{realm="bundle",title="Error loading vocabulary",detail=err}) end
 	setmetatable(bundle.vocabulary, nil)
 	bundle.vocabulary.vocabulary = nil

@@ -1111,10 +1111,12 @@ function GetDecimals (number)
 	-- returns a string, as decimals maybe 00 or zer0-prefixed
 	return string_match( number, "%.(%d+)$" )
 end
-function SplitDecimals (number)
-	-- does not return a value for decimals if ==0
+function SplitDecimals (number,optional)
+	-- does not return a value for decimals if ==0 and optional is true
 	-- WARNING: uses default number coercion thus will not work with large numbers; these must be formatted as a string for use
 	local major,minor = string_match( number, "(%d+)%.?(%d*)" )
+	minor = minor or 0
+	if optional and minor =="0" then return major end
 	return tonumber(major),tonumber(minor)
 end
 function Decimalise(number,places)

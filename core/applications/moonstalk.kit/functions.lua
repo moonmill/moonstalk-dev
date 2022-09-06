@@ -1298,6 +1298,7 @@ function Editor ()
 	if page.type ~="html" then return end
 	-- # Meta tags
 	if page.nocache then _G.page.headers['Cache-Control'] = "no-cache" end
+	if not page.title and page.vocabulary then page.title = page.vocabulary[page.language or client.language].title end
 
 	-- # Scripts
 	-- the following scripts are loaded before all others, but in reverse order so that the last of these is actually first

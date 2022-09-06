@@ -158,8 +158,6 @@ function SetSession(session,err)
 	-- assumes a valid session and user
 	-- client is optional and will always default to having an empty keychain, it provides a reliable way to access values which can be conditional in user, such as keychain, or session-specific values such as when this session was last seen
 	-- user only exists if authenticated and is thus the definitive way to check this
-	page.data.error = err or session.error
-	if page.data.error then return end
 	local user = session.user
 	_G.user = user
 	local serverclient = request.client

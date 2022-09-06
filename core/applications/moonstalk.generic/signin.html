@@ -3,13 +3,13 @@
 <h1>?(l.signin_h1)</h1>
 
 <? local reminder if not empty(page.data) then ?><p class="error">
-<? 	if page.data.error =="invalid" then request.form.password = "" reminder=true ?>
+<? 	if request.client.error =="invalid" then request.form.password = "" reminder=true ?>
 	?(l.signin_invalid)
-<? 	elseif page.data.error =="disabled" then request.form.password = "" reminder=true ?>
+<? 	elseif request.client.error =="disabled" then request.form.password = "" reminder=true ?>
 	?(l.signin_disabled)
-<? 	elseif page.data.error =="unknown" then request.form.email = "" ?>
+<? 	elseif request.client.error =="unknown" then request.form.email = "" ?>
 	?(l.signin_unknown)
-<? 	elseif page.data.error =="unverified" then reminder=true ?>
+<? 	elseif request.client.error =="unverified" then reminder=true ?>
 	?(l.signin_unverified)
 <? 	end ?>
 <? if reminder then

@@ -1,5 +1,5 @@
 var moonstalk_Kit = {}; // FIXME: use namespaces; use page.options
-client.mobile = /iPhone/.test(navigator.userAgent) ? 'ios' : (/Android/.test(navigator.userAgent)&&/Mobile/.test(navigator.userAgent)) ? 'android' : false
+client.mobile = (navigator.userAgentData && navigator.userAgentData.mobile) || /iPhone/.test(navigator.userAgent) ? 'ios' : (/Android/.test(navigator.userAgent)&&/Mobile/.test(navigator.userAgent)) ? 'android' : false
 client.portrait = window.innerHeight > window.innerWidth
 
 moonstalk_Kit.Initialise = function(){

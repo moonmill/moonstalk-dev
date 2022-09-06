@@ -1,5 +1,3 @@
-page.status = 403
-page.data = page.data or {}
 if request.client.id and page.view =="generic/signin" then
 	-- an edge case of having just signed in from the signin address
 	scribe.Redirect ( request.query_string or "/my/account" )
