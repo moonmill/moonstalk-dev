@@ -1,7 +1,7 @@
 if not moonstalk then -- first call initialises Moonstalk; this is an extremely lightweight check of initialisation to perform with each request without using the only slightly more expensive require mechanism
 	setmetatable(_G,nil) -- temporarily remove openresty's default warning about setting globals whilst moonstalk and its applications initialise themselves in it, this is replaced with our own in the openresty Starter; see functions
 	dofile "core/moonstalk/server.lua"
-	moonstalk.Initialise{server="scribe"} -- TODO: node.scribe.server=="openresty"
+	moonstalk.Initialise{server="scribe",scribe="openresty"} -- TODO: node.scribe.server=="openresty"
 end
 
 openresty.Request()

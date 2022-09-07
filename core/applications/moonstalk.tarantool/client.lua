@@ -165,12 +165,6 @@ local iterator_keys = {
 -- Lua pattern used to extract the version number from the server
 -- response header.
 local version_number_patt = '[%d.-]+[%l%x]*'
--- For versions less than 0.3.3 this setting makes sense.
--- Otherwise is deprecated.
-local mp_version, reps = gsub(mp._VERSION, '%.', '')
-if reps > 0 and tonumber(mp_version) < 33 then
-  mp.set_integer('unsigned')
-end
 
 --- Module table.
 local M = { _VERSION = '0.3.1', _NAME = 'tarantool', _DESCRIPTION = 'resty Lua library for tarantool' }

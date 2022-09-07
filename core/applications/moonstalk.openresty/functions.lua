@@ -1,4 +1,3 @@
--- REFACTOR: use scribe.lua
 -- NOTE: the _G.now timestamp is only updated upon a new request, therefore any function not invoked directly from the request cycle must instead call ngx.now()
 -- WARNING: any function that calls an async operation MUST use moonstalk.Resume(function,…) which preserves and restore the global Moonstalk tables that change with every request (notably the request table itself), and so if they are to be consumed after a possible yield (request context change such as a database call), the use of moonstalk.Resume is required to preserve the context, and simply restores these tables after such context changes (albeit at a small cost)
 -- WARNING: failure to use moonstalk.Resume but instead directly call an async function then use values from session globals request/session/user/etc WILL result in these referencing a different request/session/user/etc, thus resulting in a dangerous situation in which you will consume or leak the wrong data
@@ -8,6 +7,7 @@
 -- NOTE: moonstalk is not currently designed for large numbers of concurrent long-lived connections (websockets) though can handle them albeit requiring more memory versus simple use of openresty out of the box, in which each persistent connection may only use a few upvalues (stack registers); for each request moonstalk initialises multiple tables with multiple values that may not be needed, which when yielded are also only kept in a stack, however must be iterated prior and post yield, to store from and reassign to the global table, plus involve multiple stacks (content_by_lua->pcall->scribe.Request<->handler<->yielding_handler<->Resume<->yield; handler typically being a controller or view, and yielding_handler typically a database or other network function called from within it) thus are significantly more expensive to keep in memory
 
 if moonstalk.server ~="scribe" then if node.scribe.server ~="openresty" then log.Notice([[Openresty is not enabled because scribe.server="]]..node.scribe.server..[["]]) end return end
+-- openresty provides no functions unless in the scribe
 
 scribe.instance = ngx.shared.moonstalk:incr("worker",1,0) -- NOTE: dictionaries persist with reloads thus unless this is overridden by an application that registers with a cluster, worker ids increments with each reload and do not get reused
 moonstalk.SetInstance(scribe.instance)

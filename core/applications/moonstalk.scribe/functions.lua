@@ -35,16 +35,6 @@ _G.request = {}
 if moonstalk.server =="scribe" then append({"page","user",}, moonstalk.globals) end -- request is defined by moonstalk/server as a server primitive; with these scribe generics the total globals are 6 to be preserved -- TODO: use of scribe output functions without the scribe server would require resetting these globals and the output for each request
 append({"scribe.lua"}, moonstalk.files)
 
-if moonstalk.server =="scribe" then
-	for _,bundle in pairs(moonstalk.applications) do
-		if bundle.files["scribe.lua"] then
-			log.Debug(bundle.id.."/scribe.lua")
-			local result,imported = pcall(util.ImportLuaFile, bundle.path.."/scribe.lua", bundle)
-			if not result then moonstalk.BundleError(bundle,{realm="bundle",title="Error loading functions for scribe",detail=imported,class="lua"}); return end
-		end
-	end
-end
-
 do -- Lua has an optimised register that cheaply handles many upvalues, thus desireable to global lookups on reoccuring request calls
 local pairs = pairs
 local ipairs = ipairs
@@ -723,6 +713,13 @@ end
 
 function Enabler()
 	if moonstalk.server ~="scribe" then return end
+	for _,bundle in pairs(moonstalk.applications) do
+		if bundle.files["scribe.lua"] then
+			log.Debug(bundle.id.."/scribe.lua")
+			local result,imported = pcall(util.ImportLuaFile, bundle.path.."/scribe.lua", bundle)
+			if not result then moonstalk.BundleError(bundle,{realm="bundle",title="Error loading functions for scribe",detail=imported,class="lua"}) end
+		end
+	end
 	-- a starter sets the instance; thus enable it here
 	scribe_xmoonstalk = "server="..node.scribe.server..";instance="..moonstalk.instance..";"
 	for _,key in ipairs(moonstalk.globals) do _G[key] = {} end -- just in case there's an error before they're assigned
