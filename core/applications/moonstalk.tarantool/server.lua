@@ -272,3 +272,28 @@ function http.Request(request) -- FIXME: update to use new .handler and defer be
 	if type(request.async) =='function' then request.async(response,nil,request) end
 	return response
 end end
+
+do
+	-- NOTE: these routines are typically isolated in their use for public exposure of internal references and values (such as IDs, thus preventing iteration of them), thus each server's implementation need not be compatible except where encrypted values are exchanged between servers, however these should generally be handled using a dedicated scheme and user-specific salt and/or IV 
+local secret = node.secret
+local iv = string.sub(node.secret,-16)
+local string_gsub = string.gsub
+_G.digest = require "digest" -- {package=false} -- bundled
+local encode = digest.base64_encode
+local decode = digest.base64_decode
+_G.crypto =  require "crypto" -- {packagae=false} -- bundled
+local encrypt = digest.aes256cbc.encrypt
+local decrypt = digest.aes256cbc.decrypt
+function util.Encrypt(value)
+	-- encrypt (aes-256-cbc); base64; substitutes chars (for URL safety)
+	return string_gsub( encode( encrypt(value, secret, iv) ),
+			"[/+]",{['/']="~",['+']="-"})
+end
+function util.Decrypt(value)
+	-- NOTE: this is an exposed method as it handles any incoming token value
+	if not value then return end
+	return decrypt( decode(string_gsub( value,"[~-]", {['~']="/",['-']="+"} )), secret, iv )
+end
+end
+util.EncodeID = util.Encrypt -- OPTIMIZE: use a cheaper scheme than EcnryptID as this is used frequently to construct URLs containing ids
+util.DecodeID = util.Decrypt -- OPTIMIZE: use a cheaper scheme than EcnryptID as this is used frequently to construct URLs containing ids

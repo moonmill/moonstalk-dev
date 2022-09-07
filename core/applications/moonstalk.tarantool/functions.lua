@@ -74,9 +74,10 @@ _G.tt = _G.tarantool -- sugar, e.g. tt.table_name:select() tt.enum.op.ADD
 
 do
 	local result
-	result,_G.msgpack = pcall(require,"msgpack") -- {package=false}; "lua-cmsgpack"} -- FIXME: -- HACK: missing symbol but the server includes its own version of cmsgpack which is working but not in openresty nor elevator thus we fallback to native; set to false as is for some reason being flagged as not installed (same below)
+	result,_G.msgpack = pcall(require,"cmsgpack") -- {package="lua-cmsgpack"} -- tarantool bundles its own version but we still need one for openresty/clients
 	if not result then
-		_G.msgpack = require"MessagePack" -- {package="lua-messagepack"}; natve implementation  -- FIXME: -- HACK:
+		-- fallback to a native non-compiled version, however this must be installed manually and the prior will always be reported as missing
+		_G.msgpack = require"MessagePack" -- {package=false} -- "lua-messagepack"
 	end
 end
 NULL = 0xC0 -- the raw pack byte which is not valid for use in the Tarantool server where it and msgpack.NULL are cdata with metamethods providing equality comparison with nil

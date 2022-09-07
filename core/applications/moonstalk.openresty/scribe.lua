@@ -22,17 +22,39 @@ _G.sleep = ngx.sleep
 _G.socket = ngx.socket
 DNSResolver = require"resty.dns.resolver" -- {package=false}
 
+_G.util.b64 = ngx.encode_base64 -- faster than mime
+_G.util.unb64 = ngx.decode_base64
 do
-	local resty_string = require "resty.string" -- {package=false}; bundled
-	local resty_sha1 = require "resty.sha1" -- {package=false}; bundled
+local resty_string = require "resty.string" -- {package=false}; bundled
+local resty_sha1 = require "resty.sha1" -- {package=false}; bundled
 _G.util.sha1 = function(var) -- TODO: implement generic version for other servers and let this be an override
 	local sha1 = resty_sha1:new()
 	sha1:update(var)
 	var = sha1:final()
 	return resty_string.to_hex(var)
-end end
-_G.util.b64 = ngx.encode_base64 -- faster than mime
-_G.util.unb64 = ngx.decode_base64
+end
+end
+do
+	-- NOTE: these routines are typically isolated in their use for public exposure of internal references and values (such as IDs, thus preventing iteration of them), thus each server's implementation need not be compatible except where encrypted values are exchanged between servers, however these should generally be handled using a dedicated scheme and user-specific salt and/or IV
+local string_gsub = string.gsub
+local b64 = ngx.encode_base64
+local unb64 = ngx.decode_base64
+local aes = dofile "core/applications/moonstalk.openresty/include/aes.lua" -- TODO: inline the specific interface needed here
+local cipher = aes:new(node.secret, nil, aes.cipher(256,"cbc"), {iv=string.sub(node.secret,-16)}) -- AES 256 CBC with IV and no SALT
+function util.Encrypt(value)
+	-- encrypt (aes-256-cbc); base64; substitutes chars (for URL safety)
+	return string_gsub( b64( cipher:encrypt(value) ),
+			"[/+]",{['/']="~",['+']="-"})
+end
+function util.Decrypt(value)
+	-- NOTE: this is an exposed method as it handles any incoming token value
+	if not value then return end
+	value = unb64(string_gsub(value,"[~-]",{['~']="/",['-']="+"}))
+	return cipher:decrypt(value)
+end
+end
+util.EncodeID = util.Encrypt -- OPTIMIZE: use a cheaper scheme than EcnryptID as this is used frequently to construct URLs containing ids
+util.DecodeID = util.Decrypt -- OPTIMIZE: use a cheaper scheme than EcnryptID as this is used frequently to construct URLs containing ids
 
 multipart = { -- can be changed globally by setting openresty.multipart[key] or simply pass changed values to openresty.GetPost{max_file_size=10000000, timeout=30000}
 	tmp_dir          = "temporary/upload",

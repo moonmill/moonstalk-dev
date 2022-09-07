@@ -3,7 +3,6 @@
 
 _G.luabins = require "luabins"
 _G.posix_stdlib = require "posix.stdlib" -- {package="luaposix"}
-_G.cipher = require "openssl.cipher" -- {package="luaossl"}; installed as _openssl.so
 _G.mime = require "mime" -- {package="mimetypes"}
 _G.socket = require "socket"
 _G.lfs = require "lfs" -- {package="luafilesystem"}
@@ -65,68 +64,25 @@ end
 FileExists = FileModified
 
 do
-	--# Token creation and encoding
-	-- functions that handle integer record.id values are named FunctionID whilst those that handle tokens are named FunctionToken; tokens cannot be mapped to records unless indexes are specifically maintained
-	-- an address (public or authenticated) should never expose integer IDs from CreateID directly, apart from leaking data such as creation time, due to their compact address space which is semi-sequential (whilst not directly observable) it is nonetheless easily iterated to discover valid IDs, which in turn leads to potential attack vectors (such as directly requesting records for which the client has no permissions)
-	-- the encoding functions here are predominantly intended for use with such IDs to obfusticate them thus increasing their address space to a less easily iterated size (but not impossible, however another layer should ideally catch such traffic patterns)
-	-- tokens have much larger address-spaces which in turn requires higher overhead to attack, thus token values returned by these functions and exposed to clients must therefore be sufficiently random and non-repeatable, in addition to avoiding discovery of secrets/salts used in generating them
-	-- Encrypt is reverseable (can be decoded) which enables the transmission of directly used database keys, so avoiding the need to index and store additional tokens/hashes, however such use is ill-advised and additional record tokens should be generated and stored as these are easily invalidated and replaced, whereas an encoded ID cannot be without changing the ID itself and thus all references to records
-	-- Moonstalk uses Encrypted tokens for client sessions as the decryption routine is cheaper to perform in the case of a session address space attack, thus allowing such requests to be discarded without requiring a database check, use of Encrypt in database functions should be avoided due to its overhead, and in most cases of high-lookup incidence a preference should be for the generation of a per-record indexed token as this would be easily regenerated should need arise whereas IDs cannot be
-	-- the most most performant token generation included here is RandomID(), followed by Encrypt(CreateID()) whilst ShortToken is the slowest with even short lengths
-	-- NOTE: the 'hashids' library could be used as a 'ShortEncodeID' but has been considered to be unsuitable for inclusion due to the potential to missuse it with any sensistive record.id; if used solely with CreateID and its own salt (not node.secret) it may be more acceptable
-
-	do
-		local uuid = require "lua_uuid" -- {package=false}; optional
-		function Token(length)
-			-- much faster than ShortToken but without the custom chars; max length is 32
-			local token = string.gsub(uuid(),"%-","")
-			if length and length~=32 then return string.sub(token,1,length) end
-			return token
-		end
-	end
-
-	local iv = string.sub(node.secret,-16)
-
-	-- OPTIMIZE: the returned tokens really need a larger potential keyspace, i.e. variable length, currently the length is short thus easier to iterate
-	-- TODO: any client attempting to use more than x different tokens in succession should be blocked
-	-- TODO: the first char of the token should be a version identifier
-	local mime_b64 = mime.b64
-	b64 = mime_b64 -- should be replaced by moonstalk.server if faster options available
-	local mime_unb64 = mime.unb64
-	unb64 = mime_unb64
-	local cipher = cipher.new"aes256"
-
-	function Encrypt (value)
-		-- WARNING: uses the same fixed IV with all values; should be a seperately stored salt value but that would mean embedding it in the returned result, however security for these uses is not paramount and is typically intended to prevent iteration of values to find
-		-- encrypt (aes-256-cbc); base64; substitutes chars; trims b64 padding chars (=)
-		if type(value)=="number" then value = digits(value) end -- WARNING: digits does not work beyond 16 digits
-		return string_match( string_gsub( mime_b64( cipher:encrypt(node.secret,iv):final(value) ),
-				"[/+]",{['/']="~",['+']="-"}) .."=", "(.-)=")
-	end
-	function EncodeID(id) -- OPTIMIZE: use a cheaper scheme than EcnryptID as this is used frequently to construct URLs containing ids
-		return util.Encrypt(id or util.CreateID())
-	end
-
-	function DecodeID (id,checklength)
-		-- reverse of Encrypt
-		if not id then return end -- may be called assuming that an ID existed when it did not (e.g. request.client.token cookie)
-		id = mime_unb64(string_gsub(id,"[~-]",{['~']="/",['-']="+"}).."===")
-		id = cipher:decrypt(node.secret,iv):final(id)
-		if not id or (checklength and #id ~= checklength) then
-			log.Notice("invalid token")
-			return
-		end
-		return id
-	end
-
-	function Decrypt(value)
-		-- reverse of Encrypt
-		if not value or value == "" then return	end
-		value = mime.unb64(string_gsub(value,"[~-]",{['~']="/",['-']="+"}).."===")
-		value = cipher:decrypt(node.secret,iv):final(value)
-		return string_match(value,"(.+)\0") -- decryption may include a sequence of nil charcaters from padded input
+	local uuid = require "lua_uuid" -- {package=false}; optional
+	function Token(length)
+		-- much faster than ShortToken but without the custom chars; max length is 32
+		local token = string.gsub(uuid(),"%-","")
+		if length and length~=32 then return string.sub(token,1,length) end
+		return token
 	end
 end
+
+--# Token creation and encoding
+-- functions that handle integer record.id values are named FunctionID whilst those that handle tokens are named FunctionToken; tokens cannot be mapped to records unless indexes are specifically maintained
+-- an address (public or authenticated) should never expose integer IDs from CreateID directly, apart from leaking data such as creation time, due to their compact address space which is semi-sequential (whilst not directly observable) it is nonetheless easily iterated to discover valid IDs, which in turn leads to potential attack vectors (such as directly requesting records for which the client has no permissions)
+-- the encoding functions here are predominantly intended for use with such IDs to obfusticate them thus increasing their address space to a less easily iterated size (but not impossible, however another layer should ideally catch such traffic patterns)
+-- tokens have much larger address-spaces which in turn requires higher overhead to attack, thus token values returned by these functions and exposed to clients must therefore be sufficiently random and non-repeatable, in addition to avoiding discovery of secrets/salts used in generating them
+-- Encrypt is reverseable (can be decoded) which enables the transmission of directly used database keys, so avoiding the need to index and store additional tokens/hashes, however such use is ill-advised and additional record tokens should be generated and stored as these are easily invalidated and replaced, whereas an encoded ID cannot be without changing the ID itself and thus all references to records
+-- Moonstalk uses Encrypted tokens for client sessions as the decryption routine is cheaper to perform in the case of a session address space attack, thus allowing such requests to be discarded without requiring a database check, use of Encrypt in database functions should be avoided due to its overhead, and in most cases of high-lookup incidence a preference should be for the generation of a per-record indexed token as this would be easily regenerated should need arise whereas IDs cannot be
+-- the most most performant token generation included here is RandomID(), followed by Encrypt(CreateID()) whilst ShortToken is the slowest with even short lengths
+-- NOTE: the 'hashids' library could be used as a 'ShortEncodeID' but has been considered to be unsuitable for inclusion due to the potential to missuse it with any sensistive record.id; if used solely with CreateID and its own salt (not node.secret) it may be more acceptable
+-- NOTE: these functions are now implemented in servers
 
 -- TODO: the mechianism of passing a locale does not support per-state (child locale) variations, until locale supports these itself (e.g. locales.us-ca.parent = locales.us)
 -- WARNING: in most cases using absolute timestamps for reference datetimes is undesireable; should the parameters of calculation for the represented date-time change, the timestamp will no longer be accurately representative of its date-time; therefore a date-time whose calendar-intent should be preserved must be stored as a relative representation and calculated as an absolute timestamp only when consumed, ensuring the correct relative interpretaion at the time of consumtion rather than at the time of recoding; i.e. at the time of recording, we generate a timestamp for a future date-time, it represents an absolute point in time that assumes the same parameters of calculation (e.g. DST offset and start/end dates) will also be true at the time of consumption, however if they chnage, our timestamp will no longer be accurate

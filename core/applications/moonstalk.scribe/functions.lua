@@ -810,9 +810,10 @@ function Site(site)
 	end
 
 	scribe.ConfigureBundle(site,"sites")
-	site.token = site.token or util.Encrypt(site.id)
-	moonstalk.site_tokens[site.token] = site
-
+	if util.Encrypt then -- FIXME: as tenants and sites can have folders named with the taoken for public access strictly the elevator envionrment needs these functions as well as servers, thus utils_dependant needs a Lua native aes256-cbc module that is replaced by servers
+		site.token = site.token or util.Encrypt(site.id)
+		moonstalk.site_tokens[site.token] = site
+	end
 	if site.token_cookie then site.token_name = site.token_cookie.name end
 	site.token_name = site.token_name or "token"
 
