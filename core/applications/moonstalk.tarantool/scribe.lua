@@ -1,15 +1,6 @@
 -- NOTE: currently only supports openresty
 -- TODO: add support for plain Lua and move to client.lua, enabling in functions
 
-do local loaded
-loaded,_G.msgpack = pcall(require,"msgpack") -- {package=false}; "lua-csmgpack"}; -- FIXME: -- HACK: is flagged as not installed
-if loaded then
-	_G.msgpack = {NULL=nil,pack=cmsgpack.pack, unpack=cmgpack.unpack, set_integer=function()end} -- the tarantool client module expects the native lua-MessagePack module (out fallback as below) which is slower than C, both have slightly different APIs; we therefore provide a proxy for it but dropping the set_integer handling
-	package.loaded.msgpack = msgpack -- when the tarantool client runs require"msgpack" this table will be provided instead
-else
-	_G.msgpack = require "MessagePack" -- {package="lua-messagepack"}
-	package.loaded.messagepack = msgpack
-end end
 msgpack.NULL = "\xc0" -- FIXME: ???
 
 tarantool.client = require"moonstalk.tarantool/client" -- WAS: package="lua-resty-tarantool"
