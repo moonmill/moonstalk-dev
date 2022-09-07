@@ -71,13 +71,6 @@ append({"tarantool.lua"},moonstalk.components)
 
 _G.tt = _G.tarantool -- sugar, e.g. tt.table_name:select() tt.enum.op.ADD
 -- WARNING: client databases proxies are placed in this namespace, however they should all use plural names
-do local result
-	result,_G.msgpack = pcall(require,"msgpack") -- {package="lua_cmsgpack"}; -- in tarantool this is bundled, but regardless we expect it to be installed for other servers/clients
-	if not msgpack then
-		-- fallback to a native non-compiled version, however this must be installed manually and the prior will always be reported as missing by the elevator
-		_G.msgpack = require"MessagePack" -- {package=false} -- "lua-messagepack"
-	end
-end
 NULL = 0xC0 -- the raw pack byte which is not valid for use in the Tarantool server where it and msgpack.NULL are cdata with metamethods providing equality comparison with nil
 
 role = {} -- the tables for this node
@@ -352,6 +345,15 @@ if moonstalk.server =="tarantool" then
 	-- # enable the server
 	-- because tarantoolctl runs moonstalk as a server directly from temporary/tarantool/role.lua we must now convert that generic moonstalk server into a trantool server
 	-- TODO: this is messy as server wraps enablers etc; needs tidying up
+	_G.msgpack = require"msgpack" -- {package=false}; -- bundled
 	local result,err = include "applications/moonstalk.tarantool/server"
 	if err then moonstalk.Error{tarantool,title="Error loading server environment",detail=err} end
+else
+	do local result
+		result,_G.msgpack = pcall(require,"cmsgpack") -- {package="lua_cmsgpack"}
+		if not msgpack then
+			-- fallback to a native non-compiled version, however this must be installed manually and the prior will always be reported as missing by the elevator
+			_G.msgpack = require"MessagePack" -- {package=false} -- "lua-messagepack"
+		end
+	end	
 end
