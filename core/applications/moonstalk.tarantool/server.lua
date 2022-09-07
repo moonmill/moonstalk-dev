@@ -18,7 +18,7 @@ _G.fiber = require "fiber" -- {package=false}
 _G.socket = require "socket" -- {package=false }-- tarantool provides its own socket module that is mostly compatible with LuaSocket
 _G.fio = require"fio" -- {package=false}; built-in
 _G.csv = require"csv" -- {package=false}; built-in
--- _G.msgpack = require"msgpack" -- {package=false}; built-in; and functions already loads it
+-- msgpack is loaded by functions
 NULL = box.NULL
 ERROR = "\0"
 

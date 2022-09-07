@@ -155,12 +155,14 @@ function Request() -- request can be built in the server, typically by calling t
 			local number
 			local count = 0
 			local form = request.form
+			local expand
+			if page.post and page.post.expand then expand = true end
 			for name,value in pairs(form) do
 				number = tonumber(value); if number and tostring(number) ==value then value = number end -- we coerce (small) integer values; but not numbers that contain any formatting to avoid locale and zero-prefixed number issues; -- NOTE: this also has the desirable side-effect that IDs are not coerced to numbers, and thus their (inappropriate) use outside the internal scope requires explicit coercion
 				if count >60 then
 					scribe.Error "Too many form parameters" break -- we only checked the size of GET with a POST to protect against runaway parsing, this covers GET or POST individually
 				elseif value =="" then -- ignore, don't set thus becomes nil
-				elseif page.post.expand and string_find(name,".",1,true) then
+				elseif expand and string_find(name,".",1,true) then
 					-- Create subtables from '.' delimited names
 					util_TablePathAssign(form,name,value)
 				else
