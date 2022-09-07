@@ -200,6 +200,7 @@ do
 				end
 			end
 		end
+		if bundle.development and logging >=4 then copy(bundle.development,bundle) end
 
 		if not err then return true end
 	end
