@@ -345,7 +345,7 @@ if moonstalk.server =="tarantool" then
 	-- # enable the server
 	-- because tarantoolctl runs moonstalk as a server directly from temporary/tarantool/role.lua we must now convert that generic moonstalk server into a trantool server
 	-- TODO: this is messy as server wraps enablers etc; needs tidying up
-	_G.msgpack = require"msgpack" -- {package=false}; -- bundled
+	_G.msgpack = require"cmsgpack" -- {package=false}; -- bundled
 	local result,err = include "applications/moonstalk.tarantool/server"
 	if err then moonstalk.Error{tarantool,title="Error loading server environment",detail=err} end
 else
