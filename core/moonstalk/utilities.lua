@@ -870,7 +870,7 @@ _G.varkey = Varkey
 
 function Copy(outof,a,b,c)
 	-- defaults to deepcopy, can return a copy of a given table, or copy the contents of one to another (fully recursive), replacing existing values by default; if recurse is false performs a simple (more efficient) assignment of root values from one table to the other, but the tables will be the same pointers in both tables (i.e. changes to a subtable will affect both)
-	-- if replace is false, value will only be copied if their target key==nil (false will be preserved)
+	-- if replace is false or nil, value will only be copied if not existing (false will be preserved); recurse is true and replace is nil (the defaults) subtable keys will be copied across
 	-- performs best if outof has fewer keys than into
 	-- use append() to copy only array values
 	-- WARNING: not safe with arrays except in the root with replace=true -- TODO: add array detection and replace?
@@ -886,7 +886,7 @@ function Copy(outof,a,b,c)
 		-- copy(from,to,replace,recurse)
 		-- copies the contents from one table to another, also returning it; defaults to a shallow copy with replacing
 		into = a or {}
-		replace = b if replace==nil then replace=true end
+		replace = b
 		recurse = c if recurse==nil then recurse=true end
 	end
 	if not into or not outof then return end
@@ -894,13 +894,13 @@ function Copy(outof,a,b,c)
 		local vtype
 		for k,v in pairs(outof) do
 			vtype = type(v)
-			if vtype ~="table" and (replace or into[k] ==nil) then
+			if vtype ~='table' and (replace or into[k] ==nil) then
 				into[k] = v
-			elseif vtype=="table" then
-				if replace or into[k] ==nil then -- includes edge case where an existing non-table item must be replaced with a table
-					into[k] = copy(v)
-				elseif type(into[k]) =="table" then
+			elseif vtype =='table' then
+				if type(into[k]) =='table' then
 					copy(v,into[k],replace,true)
+				elseif replace or into[k] ==nil then
+					into[k] = copy(v)
 				end
 			end
 		end
