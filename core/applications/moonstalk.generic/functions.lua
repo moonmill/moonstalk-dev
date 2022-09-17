@@ -106,8 +106,10 @@ local table_concat = table.concat
 function Editor ()
 	-- we must provide canonical links on all pages that are not being served from their primary domain or address, to avoid duplicating the web; this is not currently optional
 	if page.status~=200 or page.type~="html" then return end
+	log.Info() page.headers['x-robots-tag'] = "none"
 	if (page.canonical and page.canonical~=request.path) or request.domain~= site.domain or (page.secure and request.scheme~='https') then
-		_G.output = string_gsub(_G.output, '</head>', table_concat{'<link rel="canonical" href="', ifthen(page.secure,'https',request.scheme), '://', site.domain, page.canonical or request.path, '" /></head>'}, 1)
+		-- TODO: move to page.headers.Link = [[<https://example.com/page-b>; rel="canonical"]] but requires support for multiple declarations
+		_G.output = string_gsub(_G.output, '</head>', table_concat{'<link rel="canonical" href="', ifthen(page.secure,'https',request.scheme), '://', site.domain, page.canonical or request.path, '" />\n</head>'}, 1)
 	end
 end
 

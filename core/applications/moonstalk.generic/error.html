@@ -25,7 +25,7 @@ local function items (errors)
 			if string.sub(item.detail,1,4)=="[str" then item.detail = string.sub(item.detail,8) end
 			write(web.SafeText(item.detail))
 		end
-		if item.trace and node.dev then write(item.trace) end
+		if item.trace and logging >3 then write(item.trace) end
 		write[[</li>]]
 	end
 end
@@ -40,7 +40,7 @@ end
 <h3>Problem details</h3>
 <ol><? items(page.error) ?></ol>
 
-<? if node.dev or logging >3 then ?>
+<? if logging >3 then ?>
 <hr style="width:100%;height:0;border:0;border-top:1px #eeeeee solid;margin-bottom:3px">
 <small style="color:grey"><i>the following are shown only in dev mode</i></small><br><br>
 	<? if #site.errors >0 then ?>

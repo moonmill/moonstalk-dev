@@ -289,7 +289,7 @@ function moonstalk.Error(bundle,error)
 	bundle = bundle or moonstalk
 	error.origin = error.origin or bundle.id
 	error.when = now
-	error.level = log.levels[error.level] or log.levels.Alert
+	error.level = log.levels[error.level] or log.levels.Info
 	if error.class =="lua" and error.detail then
 		error.detail = string.gsub(error.detail,".-%[%w- \"(.*)","%1",1) or error.detail
 		error.detail = string.gsub(error.detail,"\"]:(%d)",":%1",1)

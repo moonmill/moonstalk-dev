@@ -1297,18 +1297,11 @@ function Editor ()
 	--]]
 	if page.type ~="html" then return end
 	-- # Meta tags
-	if page.nocache then _G.page.headers['Cache-Control'] = "no-cache" end
 	if not page.title and page.vocabulary then page.title = page.vocabulary[page.language or client.language].title end
 
 	-- # Scripts
 	-- the following scripts are loaded before all others, but in reverse order so that the last of these is actually first
 	local script = {'<script>\n'}
-	if site.services then
-		if site.services.analytics and not node.dev then -- OPTIMIZE: move to parser for template/standalone html, and don't call Script instead set on tables directly; this wouldn't work for multi-tenanted but that could implement its own config mechanism
-			page.javascript.analyticsid = site.services.analytics
-			kit.Script("https://ssl.google-analytics.com/ga.js", "var pageTracker=_gat._getTracker(page.analyticsid);pageTracker._trackPageview()")
-		end
-	end
 
 	-- # JavaScript Environment
 	-- TODO: this should be suppressed for AJAX requests (using a POST param or address.ajax=true)
@@ -1320,7 +1313,7 @@ function Editor ()
 	})
 	table_insert(script, '\n')
 
-	if user then
+	if user and user.javascript then
 		table_insert(script, "var user=")
 		table_insert(script, json.encode(user.javascript))
 		table_insert(script, '\n')
@@ -1392,9 +1385,6 @@ function Editor ()
 	end
 
 	-- # Head
-	--if site.css or page.css[1] then -- site.css must be a string, page.css allows fragments to be inserted -- TODO: this is a multi-tenant feature that should be moved to dedicated editor
-	--	kit.Head(table.concat{[[<style type="text/css">]], "\n", site.css or "", "\n", table.concat(page.css,"\n"), "\n", [[</style>]]})
-	--end
 	if page._kit_head and page._kit_head[1] then
 		local head = {}
 		for _,tag in ipairs(page._kit_head) do
@@ -1408,7 +1398,7 @@ function Editor ()
 end
 
 do local vocab_js = {fr="fr",en="en"} -- TODO: this is a hack to select one of the hardcoded vocab files we have, and must be replaced when we support dynamic js vocabularies
-function VocabPath() return "/moonstalk.kit/public/vocab."..( vocab_js[request.client.language] or 'en' )..".js" end
+function VocabPath() return "/moonstalk.kit/public/vocab."..( vocab_js[page.language] or 'en' )..".js" end
 end
 function Script(...)
 	-- facilitates use of javascript dependancies in pages; call for each javascript chain to be created, or for any standalone javacsript to be included in the chain
@@ -1449,7 +1439,7 @@ end
 function EnableJS(library)
 	-- this is a convenience function to enable client-side kit features; options may be declared in page.javascript
 	-- library should be a full path or URL to jquery, else defaults to the bundled cash.js which is lightweight dropin for jQuery using the MIT licence https://github.com/fabiospampinato/cash
-	kit.Script(library or "/moonstalk.kit/public/cash.js","/moonstalk.kit/public/kit.js",kit.VocabPath(),"moonstalk_Kit.Initialise()") -- TODO: namespace the js functions
+	kit.Script(library or "/moonstalk.kit/public/cash.js","/moonstalk.kit/public/kit.js", kit.VocabPath(), "moonstalk_Kit.Initialise()") -- TODO: namespace the js functions
 end
 
 -- # Concordance functionality

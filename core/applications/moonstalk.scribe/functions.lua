@@ -174,7 +174,8 @@ function Request() -- request can be built in the server, typically by calling t
 		-- authentication populates language.locale,timezone else defaults to the site
 		client.token = request.query["≈"] or request.cookies[site.token_name] -- this indicates a signed-in or previously identified user
 		client.id = util.DecodeID(client.token) -- matches an existing session ID; failure is silent (eg. if node.secret was changed) or in case of attack, and for protected resources would get caught by locks resulting in unauthorised, otherwise the usual signed-out representation
-	elseif request.cookies.preferences then
+	elseif not client.session and request.cookies.preferences then
+		-- the preferences cookie is strictly an application routine, but is never expected to be used alongside a session (typically populated by a database interface); it is sufficiently common that we inline the condition handling rather than invoking additional handlers; the normalised keys from this thus need copying
 		client.preferences = json.decode(request.cookies.preferences)
 		client.language = client.preferences.language
 		client.locale = client.preferences.locale
@@ -612,7 +613,7 @@ function Include(path)
 	-- typically used for inlineing content that has been saved as a seperated self-contained file for better speration, e.g. <script>?(scribe.InlineFile"view.js")</script>
 	-- TODO: watch the file for changes and update the cache automatically
 	-- TODO: use file discovery, starting with site.path then application path, and cache the results per site
-	if not file_cache[path] or node.dev then
+	if not file_cache[path] or logging >3 then
 		local data,err = util.FileRead(path)
 		if err then return scribe.Error{title="Cannot include file: "..string.match(path,"[^/]+$"), detail=err} end
 		local type = string.match(path,"[^%.]+$")
@@ -717,7 +718,7 @@ function Enabler()
 		if bundle.files["scribe.lua"] then
 			log.Debug(bundle.id.."/scribe.lua")
 			local result,imported = pcall(util.ImportLuaFile, bundle.path.."/scribe.lua", bundle)
-			if not result then moonstalk.BundleError(bundle,{realm="bundle",title="Error loading functions for scribe",detail=imported,class="lua"}) end
+			if not result then moonstalk.BundleError(bundle,{realm="bundle",title="Error loading scribe functions",detail=imported,class="lua"}) end
 		end
 	end
 	-- a starter sets the instance; thus enable it here
@@ -958,7 +959,7 @@ function EnableSiteApplication(bundle,name,dependent)
 	end
 end
 
-if node.dev or logging >3 then
+if logging >3 then
 	local moonstalk_Resume = moonstalk.Resume
 	function moonstalk.Resume(...)
 		-- adds debugging
@@ -1233,7 +1234,7 @@ function TranslateView (data,view)
 	local function outputString (s, i, f)
 		s = string.sub(s, i, f or -1)
 		if #s==0 then return nil end -- ignore blank values
-		-- if node.dev then return [[ output[#output+1]= [=[]]..s..[[]=] or EmptyMacro(); ]] end -- TODO:
+		-- if logging >3 then return [[ output[#output+1]= [=[]]..s..[[]=] or EmptyMacro(); ]] end -- TODO:
 		return [[ output.length=output.length+1;output[output.length]= [=[]]..s..[[]=]; ]] -- escape the append assignment value as a long string
 		--return [[ table.insert(output,[=[]]..s..[[]=]); ]] -- escape the append assignment value as a long string
 	end

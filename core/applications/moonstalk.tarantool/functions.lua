@@ -351,7 +351,7 @@ if moonstalk.server =="tarantool" then
 else
 	do local result
 		result,_G.msgpack = pcall(require,"cmsgpack") -- {package="lua_cmsgpack"}
-		if not msgpack then
+		if not result then
 			-- fallback to a native non-compiled version, however this must be installed manually and the prior will always be reported as missing by the elevator
 			_G.msgpack = require"MessagePack" -- {package=false} -- "lua-messagepack"
 		end

@@ -41,7 +41,7 @@ function log.Info (msg)   if level > 2 then Append(msg," [i] "); return nil,msg 
 function log.Notice (msg) if level > 1 then Append(msg," [★] "); return nil,msg end end
 function log.Alert (msg)  if level > 0 then Append(msg," [‼︎] "); return nil,msg end end
 function log.Priority (msg)
-	if not node.dev and node.admin then email.Send{to=node.admin,subject="Moonstalk critical message",body="on instance "..node.instance.." of "..node.server.." at "..node.hostname.."\n\n"..msg} end
+	if node.production and node.admin then email.Send{to=node.admin,subject="Moonstalk critical message",body="on instance "..node.instance.." of "..node.server.." at "..node.hostname.."\n\n"..msg} end
 	Append(msg," [✻] ")
 	return nil,msg
 end

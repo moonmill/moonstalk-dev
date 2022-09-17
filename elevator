@@ -608,8 +608,12 @@ for _,command in ipairs(arg) do
 	elseif string.find(command,"=",1,true) then
 		-- NOTE: table assignments must escape strings, spaces and commas to protect from the shell
 		local key,value = string.match(command,"(.-)=(.*)")
-		if value =="" then
+		if value =="" or value =="nil" then
 			value = "nil"
+		elseif value =="true" then
+			value = true
+		elseif value =="false" then
+			value = false
 		elseif not string.find(value,[["]],1,true) and not string.find(command,"{",1,true) and not tonumber(value) then -- quote unquoted strings only, as shell does not preserve them
 			value = [["]]..value..[["]]
 		end

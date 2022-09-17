@@ -108,7 +108,7 @@ function Enabler()
 end
 function Starter()
 	return function() -- a finaliser, we can't use the Starter function itself as we don't know what other starters are still doing
-	if node.dev and logging >3 then
+	if logging >3 then
 		-- in debug mode we catch attempts to set errant globals, only being valid for creation prior to applications being started; must be configured here in the Starter as Enablers may create new globals
 		scribe._globalcheck = {} -- to keep track of what we've already warned about to avoid recurrence with every request
 		local meta = {}
