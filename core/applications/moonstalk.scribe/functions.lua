@@ -137,7 +137,7 @@ function Request() -- request can be built in the server, typically by calling t
 			page.status = 413; output = "request body too large"; return -- returning immediately thus must provide string not table
 			-- in an async server this should occur before a large body has been fully read, thus we can reject if not permitted, before it has been fully received, written to a temporary file, and processed; however if the curator and collator use database calls, then a significaant part of the body may already have been received by this point thus presenting greater DoS opportunity on all moonstalk processed addresses
 		end
-		if request.method =="POST" and page.post.form ~=false and scribe.GetPost() =="form" then
+		if request.method =="POST" and (not page.post or page.post.form ~=false) and scribe.GetPost() =="form" then
 			page.headers['Cache-Control'] = "no-cache" -- nothing accepting GET or POST params should be cached; there are scenarios where however the GET params do not modify content and these should set nocache = nil
 			log.Debug"preparing form"
 			-- strip empty values and sanitise
