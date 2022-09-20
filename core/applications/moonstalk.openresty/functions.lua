@@ -135,24 +135,25 @@ do
 local reqargs = require"resty.reqargs" -- {package="lua-resty-reqargs"}
 local ngx_req_get_post_args = ngx.req.get_post_args
 local ngx_req_read_body = ngx.req.read_body
+local ngx_req_get_body_data = ngx.req.get_body_data
 local util_MergeIf = util.MergeIf
 local pairs = pairs
-function GetPost()
+function GetPost() -- REFACTOR: shoud be type specific
 	-- multipart_options = false to parse only urlencoded (e.g. for lighweight payloads such as signin)
 	-- transparently handles file buffering to disk, which can also be configured in nginx.conf per https://github.com/bungle/lua-resty-reqargs
 	-- check request.form._error or the second return argument
 	-- causes processing to wait for the body to be received (it is thus preferable to call after having performed authentication and otehr preparatory database calls once more or all of the body is likely to have been received, e.g. call it from a controller)
 	local request = _G.request
 	if request.type =="application/x-www-form-urlencoded" then
-		local foo,bar = moonstalk_Resume(ngx_req_read_body) -- async function (as can be invoked before the full payload has been received)
+		moonstalk_Resume(ngx_req_read_body) -- async function (as can be invoked before the full payload has been received)
 		local form,err = ngx_req_get_post_args()
-		if err then scribe.Error{realm="form",title="Reqargs urlencoded form error: "..err} end -- TODO: option to not throw
+		if err then return scribe.Error{realm="form",title="Reqargs urlencoded form error: "..err} end -- TODO: option to not throw
 		-- errors are only typical if client_body_buffer_size and client_max_body_size do not match
 		request.form = form
 	elseif request.type =="multipart/form-data" then
 		local multipart_options = util_MergeIf(openresty.multipart, page.post)
 		local get,form,files = moonstalk_Resume(reqargs, multipart_options)
-		if not get and form then scribe.Error{realm="form",title="Multipart upload error: "..form} end -- nil,error -- TODO: option to not throw
+		if not get and form then return scribe.Error{realm="form",title="Multipart upload error: "..form} end -- nil,error -- TODO: option to not throw
 		request.form = form
 		if files then
 			for key,item in pairs(files) do -- TODO: create a timer function/worker that removes these files when the request is done unless flagged file.remove=false
@@ -167,10 +168,17 @@ function GetPost()
 				end
 			end
 		end
+	elseif request.type =="application/json" then
+		moonstalk_Resume(ngx_req_read_body)
+		local err
+		request.json,err = json.decode(ngx_req_get_body_data())
+		if err then return scribe.Error{title="Error reading JSON request to "..request.path, detail=err} end
+		return "json"
 	else
 		-- when wanting to process other types of post: address.post={form=false}
-		scribe.Error{realm="form",title="Unsupported post encoding: "..request.type}
+		return scribe.Error{realm="form",title="Unsupported post encoding: "..(request.type or request.method)}
 	end
+	return "form"
 end end
 
 do
