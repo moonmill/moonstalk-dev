@@ -200,7 +200,10 @@ do
 				end
 			end
 		end
-		if bundle.development and logging >=4 then copy(bundle.development,bundle) end
+		if not node.production and bundle.development then
+			log.Info("using development settings")
+			copy(bundle.development,bundle)
+		end
 
 		if not err then return true end
 	end
@@ -259,10 +262,11 @@ end
 function moonstalk.EnableBundle(bundle)
 	--local sandbox; if bundle.id sandbox=false end -- we want the server functions to have direct write access to the global enviornment rather than invoking a metatable via the bundle environment -- NOTE: this means local (bundle) assignments from functions in these files must use the full namespace, e.g. scribe.wibble=wobble
 	--if sandbox ~=false then setmetatable(bundle,{__index=_G, _bundle=bundle.id}) end
+	local result,err
 	if bundle.files["functions.lua"] then
 		-- TODO: setfenv on all functions in the bundle so they share a single namespace and can reference each other using keys not full paths, currently each ImportLuaFile call assigns a seperate environment; this could however only be done once all imports and function assignments are complete as due to nesting of calls (import(functions > import(client))) the deeper calls have no access to the original bundle environment
-		imported,err = util.ImportLuaFile(bundle.path.."/functions.lua",bundle)
-		if err then
+		local result,err = pcall(util.ImportLuaFile, bundle.path.."/functions.lua", bundle)
+		if not result then
 			bundle.ready = false
 			return moonstalk.Error{bundle, title="Error loading functions",detail=err,class="lua"}
 		end
@@ -270,7 +274,7 @@ function moonstalk.EnableBundle(bundle)
 
 	if bundle.Loader then -- DEPRECATED: REFACTOR: using a loader is entirely redundant as the functions file serves this purpose itself
 		log.Debug(bundle.id..".Loader()")
-		local result,err = pcall(bundle.Loader)
+		result,err = pcall(bundle.Loader)
 		if not result then
 			moonstalk.Error{bundle, title="Loader failed", detail=err, class="lua"}
 			bundle.ready = false

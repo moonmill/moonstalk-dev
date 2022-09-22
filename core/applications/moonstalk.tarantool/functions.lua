@@ -353,7 +353,9 @@ else
 		result,_G.msgpack = pcall(require,"cmsgpack") -- {package="lua_cmsgpack"}
 		if not result then
 			-- fallback to a native non-compiled version, however this must be installed manually and the prior will always be reported as missing by the elevator
-			_G.msgpack = require"MessagePack" -- {package=false} -- "lua-messagepack"
+			local result
+			result,_G.msgpack = pcall(require,"MessagePack") -- {package=false} -- "lua-messagepack"
+			if not result then moonstalk.Error{tarantool,title="No MessagePack library available for client.", detail="Install lua_cmsgpack or lua-messagepack using luarocks."} end
 		end
 	end	
 end

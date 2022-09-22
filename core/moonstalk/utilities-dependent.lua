@@ -64,12 +64,14 @@ end
 FileExists = FileModified
 
 do
-	local uuid = require "lua_uuid" -- {package=false}; optional
-	function Token(length)
-		-- much faster than ShortToken but without the custom chars; max length is 32
-		local token = string.gsub(uuid(),"%-","")
-		if length and length~=32 then return string.sub(token,1,length) end
-		return token
+	local result,uuid = pcall(require,"lua_uuid") -- {package=false}; optional
+	if result and uuid then
+		function Token(length)
+			-- much faster than ShortToken but without the custom chars; max length is 32
+			local token = string.gsub(uuid(),"%-","")
+			if length and length~=32 then return string.sub(token,1,length) end
+			return token
+		end
 	end
 end
 

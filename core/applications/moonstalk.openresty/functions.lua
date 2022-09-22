@@ -198,7 +198,7 @@ function Respond() -- this could be optimised to be inline in content_by_lua_blo
 end
 
 
-local resty_cookie = require "resty.cookie" -- {package=false}
+local resty_cookie = require "resty.cookie" -- {package="lua-resty-cookie"}
 local CookieReader = {__index=function(cookies,name)
 	-- handles on-demand values in request.cookies using Nginx's reader
 	if not rawget(cookies,"_reader") then cookies._reader = resty_cookie:new() end

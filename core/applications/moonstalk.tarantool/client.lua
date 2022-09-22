@@ -39,7 +39,7 @@ if ngx then
 	tcp = ngx.socket.tcp
 	sha1b = ngx.sha1_bin
 else
-	sha1b = require"sha1".binary
+	sha1b = require"sha1".binary -- {package=false} -- must be manually installed if client is elsewhere
 end
 -- Debugging related functions.
 local ERR = ngx.ERR

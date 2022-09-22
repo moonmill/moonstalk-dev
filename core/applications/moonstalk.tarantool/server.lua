@@ -281,7 +281,7 @@ local string_gsub = string.gsub
 _G.digest = require "digest" -- {package=false} -- bundled
 local encode = digest.base64_encode
 local decode = digest.base64_decode
-_G.crypto =  require "crypto" -- {packagae=false} -- bundled
+_G.crypto =  require "crypto" -- {package=false} -- bundled
 local encrypt = digest.aes256cbc.encrypt
 local decrypt = digest.aes256cbc.decrypt
 function util.Encrypt(value)

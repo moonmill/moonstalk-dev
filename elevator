@@ -243,7 +243,7 @@ local function checkmodules(dir,directories)
 	local shell = io.popen([[grep -H ]]..directories..[["require \?(\?\"" ]]..dir)
 	for line in shell:lines() do
 		local file,name,comment = string.match(line,"^(.-):.-require ?%(?[\"'](.-)['\"]%-?%-?(.*)")
-		if file and not string.find(file,"/_",1,true) and module~=nil and elevator.modules[name]~=false and not string.find(line,":[%s]*%-%-") and not string.find(name,"/",1,true) then -- ignores disabled files, commented out, local packages (containing /) which are already available; the pattern also ignores pcall(require,… which are obviously conditional
+		if file and not string.find(file,"/.",1,true) and not string.find(file,"/_",1,true) and name~=nil and elevator.modules[name]~=false and not string.find(line,":[%s]*%-%-") and not string.find(name,"/",1,true) then -- ignores disabled/hidden dirs/files, commented out, local packages (containing /) which are already available; the pattern also ignores pcall(require,… which are obviously conditional
 			local module,error
 			if comment then
 				comment = string.match(comment, "({[^%}]+})")
@@ -252,7 +252,7 @@ local function checkmodules(dir,directories)
 					if error then print(error) end -- TODO: proper output
 				end
 			end
-			local module = module or {}
+			module = module or {}
 			elevator.modules[name] = elevator.modules[name] or {}
 			local default = elevator.modules[name]
 			if default.package ==nil then default.package = name end
@@ -265,7 +265,7 @@ local function checkmodules(dir,directories)
 			default.files = default.files or {}
 			if module.package ~=false then
 				modules[default.package] = default
-				if not findmodule(default.name) then table.insert(install, default); install[default.name]=true end
+				if not install[default.name] and not findmodule(default.name) then table.insert(install, default); install[default.name]=true end
 			end
 			table.insert( default.files, file )
 			-- we're not checking if the module actually works, although it would be good however is incompatible with server implementations whose modules cannot be tested outside their server environments
@@ -325,7 +325,7 @@ if not arg[1] then
 	checkmodules"core/applications"
 	checkmodules"core/moonstalk"
 	checkmodules"sites"
-	checkmodules("clerk",false)
+	-- checkmodules("clerk",false) -- FIXME:
 	checkmodules("elevator",false)
 end
 
