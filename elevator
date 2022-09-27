@@ -416,7 +416,7 @@ end
 -- # shared moonstalk config
 
 os.execute(" > temporary/elevator.log") -- reset
-moonstalk.Initialise{server="elevator", ready=false, log="temporary/elevator.log", logging=4}
+moonstalk.Initialise{server="elevator", ready=false, exit=false, log="temporary/elevator.log", logging=4}
 
 if elevator.package_path then
 	if node.lua ==nil and node.luarocks~=false then

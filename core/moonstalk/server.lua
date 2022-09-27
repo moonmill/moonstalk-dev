@@ -454,15 +454,31 @@ function moonstalk.EnableApplications(disable)
 			end
 		end
 	end
-	util.SortArrayByKey(finalisers,"priority")
-	for _,finaliser in ipairs(finalisers) do
-		log.Debug(finaliser.id.." ->finaliser")
-		local result,error = xpcall(finaliser.handler, debug.traceback)
-		if not result then
-			local bundle = finaliser.bundle or moonstalk
-			moonstalk.BundleError(bundle, {realm="application", title=finaliser.id.." ->finaliser failed", detail=error, class="lua"})
-			bundle.ready = false
+
+	if moonstalk.errors[1] then -- TODO: should only consider Notice or greater levels, or where error.exit ~=false
+		if moonstalk.initialise.exit ~=false then
+			log.Priority"Failed to initialise; exiting"
+			os.exit()
 		end
+	else
+		moonstalk.ready = true --  TODO: if moonstalk.ready ~= false then -- and catch errors
+	end
+	if moonstalk.initialise.ready ==false then
+		-- finalisers must be run manually
+		log.Info"Initialisation completed"
+	else
+		-- finalisers cannot care about server status and are run only if all starters were successful
+		util.SortArrayByKey(finalisers,"priority")
+		for _,finaliser in ipairs(finalisers) do
+			log.Debug(finaliser.id.." ->finaliser")
+			local result,error = xpcall(finaliser.handler, debug.traceback)
+			if not result then
+				local bundle = finaliser.bundle or moonstalk
+				moonstalk.BundleError(bundle, {realm="application", title=finaliser.id.." ->finaliser failed", detail=error, class="lua"})
+				bundle.ready = false
+			end
+		end
+		log.Priority"Started"
 	end
 end
 
@@ -476,14 +492,16 @@ function moonstalk.BundleForPath(path)
 end
 
 function moonstalk.Shutdown()
-	log.Notice("Shutting down")
-	for id,app in pairs(moonstalk.applications) do
-		if app.Shutdown then
-			local result,err = pcall(app.Shutdown)
-			if err then log.Alert("Application terminator failed for "..id..": "..err) end
+	log.Info("Shutting down")
+	if moonstalk.ready then
+		for id,app in pairs(moonstalk.applications) do
+			if app.Shutdown then
+				local result,err = pcall(app.Shutdown)
+				if err then log.Alert("Application terminator failed for "..id..": "..err) end
+			end
 		end
+		log.Alert("Shutdown completed for "..moonstalk.server.." on "..node.hostname)
 	end
-	log.Alert("Shutdown completed for "..moonstalk.server.." on "..node.hostname)
 end
 
 -- # Resume
@@ -525,7 +543,8 @@ function moonstalk.Resume(call,...)
 end
 function moonstalk.Initialise(options)
 	-- options.applications=false defers loading
-	-- options.ready=false should be used in client apps (named as a server) to silence their started status and in servers which carry out additional long running startup routines before they manually log.Priority"Started"
+	-- options.ready=false should be used in client apps (named as a server) to silence their started status and finalisers, or in servers which carry out additional long running startup routines before they manually run finalisers and log.Priority"Started"
+	-- options.exit=false if the process should remain running/interactive in cases of errors during initialisation (default is to exit, e.g. in the case of a database it shoudl not run if it cannot guarantee the integrity of its enviornment)
 	-- options.server = "name" for any daemon process with an elevator.lua file
 	-- options.procedures = true for a lua database server
 	-- options.coroutines = false for a single-threaded server
@@ -816,6 +835,7 @@ function moonstalk.Initialise(options)
 
 	--# Applications
 	-- we can't call application functions (enablers/starters) until the environment is normalised
+	-- and checks applications for errors
 	moonstalk.EnableApplications(options.disable)
 
 	if moonstalk.async ==false then
@@ -826,13 +846,6 @@ function moonstalk.Initialise(options)
 		keyed(moonstalk.globals)
 	end
 	keyed(moonstalk.files)
-
-	if options.ready ==false then
-		log.Info"Initialisation completed"
-	else
-		log.Priority"Started"
-	end
-	moonstalk.ready = true --  TODO: if moonstalk.ready ~= false then -- and catch errors
 end
 end
 

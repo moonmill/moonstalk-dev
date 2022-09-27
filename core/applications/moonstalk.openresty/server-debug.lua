@@ -1,7 +1,7 @@
 if not moonstalk then
 	setmetatable(_G,nil)
 	dofile "core/moonstalk/server.lua"
-	moonstalk.Initialise{server="scribe",scribe="openresty"}
+	moonstalk.Initialise{server="scribe",scribe="openresty",exit=false}
 end
 
 openresty.Request()
