@@ -155,7 +155,6 @@ function moonstalk.GetBundles (path)
 			folder.name = name
 			folder.id = name
 			folder.path = path.."/"..name
-			folder.ready = true -- should be set to false if any stopping errors occur that may affect application dependancies
 			if string.sub(path,-5) ~= "sites" and string.find(name,".",1,true) then
 				-- remove the namespace prefix from application bundle ids (but not their names)
 				folder.namespace,folder.id = string.match(name,"(.*)%.(.-)$")
@@ -437,6 +436,9 @@ function moonstalk.EnableApplications(disable)
 				if err then moonstalk.BundleError(application,{realm="bundle",title="Error loading tests",detail=err,class="lua"}) end
 				application.files["test.lua"] = nil
 			end
+			if not application.errors[1] and application.ready ==nil then
+				application.ready = true
+			end
 			if application.Starter then
 				-- can optionally return a table defining a handler to run as a finaliser using an arbitrary priority
 				log.Debug(name..".Starter()")
@@ -455,7 +457,7 @@ function moonstalk.EnableApplications(disable)
 		end
 	end
 
-	if moonstalk.errors[1] then -- TODO: should only consider Notice or greater levels, or where error.exit ~=false
+	if moonstalk.errors[1] then -- TODO: should only consider Notice or greater levels, or where error.exit ~=false -- TODO: aggregrate errors, i.e. don't push to a notifcation service until this point when only the first 2 need be included and a link to manager/status?token
 		if moonstalk.initialise.exit ~=false then
 			log.Priority"Failed to initialise; exiting"
 			os.exit()
@@ -493,15 +495,13 @@ end
 
 function moonstalk.Shutdown()
 	log.Info("Shutting down")
-	if moonstalk.ready then
-		for id,app in pairs(moonstalk.applications) do
-			if app.Shutdown then
-				local result,err = pcall(app.Shutdown)
-				if err then log.Alert("Application terminator failed for "..id..": "..err) end
-			end
+	for id,app in pairs(moonstalk.applications) do
+		if app.Shutdown then
+			local result,err = pcall(app.Shutdown)
+			if err then log.Alert(id..".Shutdown failed: "..err) end
 		end
-		log.Alert("Shutdown completed for "..moonstalk.server.." on "..node.hostname)
 	end
+	log.Alert("Shutdown completed for "..moonstalk.server.." on "..node.hostname)
 end
 
 -- # Resume
