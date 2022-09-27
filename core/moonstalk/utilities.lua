@@ -1483,7 +1483,7 @@ function Serialise (object,maxdepth,lines,depth)
 		if lines then table_insert(serialised,"\n") end
 		table_insert(serialised,lines or "}")
 	elseif typed == 'userdata' or typed =='function' then
-		table_insert(serialised,"nil")
+		table_insert(serialised,"_function_or_userdata_")
 	elseif object ~= nil then
 		table_insert(serialised,tostring(object))
 	end

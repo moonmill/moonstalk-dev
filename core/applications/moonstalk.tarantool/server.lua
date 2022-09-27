@@ -65,7 +65,7 @@ function Enabler()
 				if index.sequence and not box.sequence[index.sequence] then box.schema.sequence.create(index.sequence) end
 				if not box.space[table.name].index[index.name] then
 					local result,error = pcall(crud_methods.create_index, box.space[table.name], index.name, index)
-					if not result then moonstalk.Error{tarantool, title="Error in table "..name.." index "..(index.name or i), detail=error} end
+					if not result then moonstalk.Error{tarantool, title="Error in table "..name.." index "..(index.name or i), detail=error} end -- FIXME: remove 
 				end
 			end
 		end
@@ -203,6 +203,10 @@ function Connected(client)
 	return cached
 end
 
+function Ping()
+	-- used by elevator to check status -- TODO:
+	return "pong"
+end
 
 do local type = type
 function table.update(from,to)

@@ -154,28 +154,29 @@ function Signout()
 	scribe.Redirect([[http://]].. request.domain ..[[/?signed-out]]) -- TODO: use referrer
 end
 
-function SetSession(session,err)
+function SetSession(session)
 	-- an authenticator is responsible for calling this, and ensuring that request.client.id is valid if a new session has been established
-	-- session = {user={nick="name", seen=time, …}, client={seen=time, …}}
-	-- assumes a valid session and user
+	-- session = {user={nick="name", seen=time, …}, client={seen=time, …}, error="ref"}
 	-- client is optional and will always default to having an empty keychain, it provides a reliable way to access values which can be conditional in user, such as keychain, or session-specific values such as when this session was last seen
+	-- error is propagated to and used by signin page
 	-- user only exists if authenticated and is thus the definitive way to check this
+	page.session = session -- anything in session is available from page.session, notably page.session.error
 	local user = session.user
-	_G.user = user
-	local serverclient = request.client
-	local client = session.client or serverclient
-	request.client = client
-	-- NOTE: the only values that currently needs persisting
-	client.ip = serverclient.ip
-		-- the follow prefer user values (i.e. persistent settings) but preserve client values (i.e. browser dervived values)
-	-- TODO: support per-domain defaults instead of per-site (e.g. *.co.uk or uk.* locale=uk)
-	client.language = user.language or site.language
-	client.locale = user.locale or site.locale
-	client.timezone = user.timezone or site.timezone
-	client.keychain = user.keychain or EMPTY_TABLE
-	if user and not user.token then user.token = util.EncodeID(user.id) end -- OPTIMIZE: this should be done on demand using a metatable call e.g. local token = user.token or user.token()
-	if now > client.seen +time.hour*8 then
-		scribe.Token(client.id) -- if the session hasn't been used for a while force renewal of token expiry, this avoids setting it everytime during a short session; this is slightly redundant when site.token_cookie.expiry is set to a large value but nonetheless still required with low-overhead
+	local client = session.client or request.client
+	if user then
+		_G.user = user
+		request.client = client
+		client.ip = request.client.ip
+			-- the follow prefer user values (i.e. persistent settings) but preserve client values (i.e. browser dervived values)
+		-- TODO: support per-domain defaults instead of per-site (e.g. *.co.uk or uk.* locale=uk)
+		client.language = user.language or site.language
+		client.locale = user.locale or site.locale
+		client.timezone = user.timezone or site.timezone
+		client.keychain = user.keychain or EMPTY_TABLE
+		if not user.token then user.token = util.EncodeID(user.id) end -- OPTIMISE: this should be done on demand using a metatable call e.g. local token = user.token or user.token()
+		if client.seen and now > client.seen +time.hour*8 then
+			scribe.Token(client.id) -- if the session hasn't been used for a while force renewal of token expiry, this avoids setting it everytime during a short session; this is slightly redundant when site.token_cookie.expiry is set to a large value but nonetheless still required with low-overhead
+		end
 	end
 end
 

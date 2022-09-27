@@ -6,6 +6,12 @@ msgpack.NULL = "\xc0" -- FIXME: ???
 tarantool.client = require"moonstalk.tarantool/client" -- WAS: package="lua-resty-tarantool"
 local tarantool_client = tarantool.client
 
+local function Error(err,detail)
+	if type(err) ~='table' then err = {tarantool, title=err, level="Notice"} end
+	err.detail = err.detail or detail
+	return scribe.Error(err)
+end
+
 function tarantool.Connect(interface)
 	if request[interface] then request[interface]:close() end
 	local result,err
@@ -25,13 +31,13 @@ if moonstalk.initialise.coroutines ~=false then
 		-- unfortunately we have to do this with every query, even when sequential in the same request, as apparently reusing the socket is not possible -- OPTIMIZE: storing the server connection object in request[interface] = server is not reusable however the references may have been incorrect when original tested, for now we recreate the socket
 		local server,err = ngx.socket.tcp()
 		local result,err = server:connect(interface.host, interface.port, interface.socket_options)
-		if not result then return nil,err end
+		if not result then return Error("database connection failure to "..interface.role, err) end
 		request[interface] = server -- FIXME: remove this in the client
 		if server:getreusedtimes() ==0 then -- connection is freshly established, the server probably restarted, else the connection has been in the pool a while
 			-- technically if we called tarantool.connect each time teh handshake and authentication woudl be transparently handled for us, albeit at teh cost of invoking serveral additional functions thus we've hoisted that functionality inline here
 			-- request[interface]:settimeout(1000) -- HACK: this fixed the frequent corrupted msgpack transactions, but is only used for the initial connection on server startup
 			result,err = tarantool_client.handshake(interface)
-			if not result then return nil,err end
+			if not result then return Error("database reconnection failure to "..interface.role, err) end
 			log.Info("[re]connected to Tarantool instance '"..interface.role.."'") -- TODO: indicate reconnection
 		end
 		if interface.table then
@@ -53,7 +59,7 @@ if moonstalk.initialise.coroutines ~=false then
 			elseif interface.table then method = method .." for "..interface.table end
 			--]]
 			method = pack(...)[1] or interface.table or ""
-			return scribe.Error{tarantool, level="Notice", title="failure with "..method.." on tarantool."..interface.role, detail=err}
+			return Error("procedure "..method.." failed on "..interface.role, err)
 		end
 		log.Debug(result)
 		server:setkeepalive(0) -- return to pool with indefinate keep-alive
@@ -72,7 +78,7 @@ if moonstalk.initialise.coroutines ~=false then
 	end
 	local tarantool_client_call = tarantool.client.call
 	tarantool.methods.call = function(interface,procedure,...)
-		log.Debug("calling tarantool procedure: "..procedure)
+		log.Debug("calling tarantool procedure "..procedure)
 		local arg = {...}; if not arg[1] then arg = nil end
 		return moonstalk_Resume(TarantoolServerMethod, interface, tarantool_client_call, nil, procedure, arg)
 		--return result[1],result[2]
@@ -154,16 +160,6 @@ function tarantool.Manifest(group,all)
 		 end
 	end
 	return changes,changed
-end
-
-local function Error(err)
-	log.Debug(err)
-	if type(err) ~='table' then err = {title=err} end
-	if err.detail then err.detail = ": "..err.detail end
-	err.detail = "Table "..tarantool.tnt_table.." on instance "..tarantool.tnt_instance..(err.detail or "")
-	err.realm = "Datastore"
-	scribe.Error(err)
-	return nil,err.title
 end
 
 -- the Run function is multipurpose and wraps a meta behaviour that includes cache updates; procedures called using this method may return whatever they want

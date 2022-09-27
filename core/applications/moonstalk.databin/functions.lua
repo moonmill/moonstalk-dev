@@ -98,7 +98,7 @@ function Cache(options)
 end
 end
 
-function Starter()
+function Enabler()
 	local autosave_default = ifthen(moonstalk.scribe.instances ==1,"scribe")
 	local error
 	for name,table in pairs(moonstalk.databases.tables) do
