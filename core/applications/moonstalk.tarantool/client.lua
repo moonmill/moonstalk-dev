@@ -4,7 +4,7 @@
 -- @license MIT
 -- https://github.com/perusio/lua-resty-tarantool
 
--- modified for Moonstalk; instead of using the .sock on a new connection table we reuse the connection table as a server interface and put the sock in the request table using the server interface table to look it up, thus the server can be sharedbetween request contexts persisting _spaces and _indexes across requests; removed defaults and their iterations (should be specified once in the server table); get_space_id and get_index_id use direct table lookups avoiding function overhead if cached or fallback call if not yet cached
+-- modified for Moonstalk; instead of using the .sock on a new connection table we reuse the connection table as a server interface and put the sock in the request table using the server interface table to look it up, thus the server can be shared between request contexts persisting _spaces and _indexes across requests; removed defaults and their iterations (should be specified once in the server table); get_space_id and get_index_id use direct table lookups avoiding function overhead if cached or fallback call if not yet cached; using lua-cmsgpack instead of lua-MessagePack (does not use an unpacker interator)
 -- TODO: support plain lua
 
 -- Bit operations. Try to use the LuaJIT bit operations package.
@@ -16,8 +16,8 @@ elseif not ok_bit then
   return nil, 'Bitwise operator support missing.'
 end
 
--- MessagePack handling.
-local mp = msgpack
+local msgpack_pack = msgpack.pack
+local msgpack_unpack = msgpack.unpack
 
 --- Some local definitions.
 -- String functions.
@@ -277,9 +277,9 @@ end
 --   Serialized request messge using MsgPack.
 local function encode_request(header, body)
   local msg = new_tab(3, 0)
-  msg[2] = mp.pack(header)
-  msg[3] = mp.pack(body)
-  msg[1] = mp.pack(slen(msg[2]) + slen(msg[3]))
+  msg[2] = msgpack_pack(header)
+  msg[3] = msgpack_pack(body)
+  msg[1] = msgpack_pack(slen(msg[2]) + slen(msg[3]))
   return concat(msg)
 end
 
@@ -291,8 +291,8 @@ end
 -- @return string
 --   Serialized request messge using MsgPack.
 local function encode_request_no_body(header)
-  local msg = mp.pack(header)
-  return mp.pack(slen(msg)) .. msg
+  local msg = msgpack_pack(header)
+  return msgpack_pack(slen(msg)) .. msg
 end
 
 --- Issue a request to tarantool.
@@ -348,12 +348,9 @@ local function tnt_request(self, header, body)
   end
 
   -- Get the size (deserialize it).
-  size = mp.unpack(size)
+  size = msgpack_unpack(size)
   -- If if fails then bail out.
   if not size then
-local result = sock:receive("*") -- FIXME:
-log.Alert"bad size"
-log.Alert(string.tohex(result))
     sock:close()
     return nil, 'Client response has invalid size.'
   end
@@ -363,32 +360,19 @@ log.Alert(string.tohex(result))
         sock:close()
     return nil,  format('Failed to get response header and body: %s.', err)
   end
-  -- Deserialize the response. Returns an iterator.
-  local iterator = mp.unpacker(header_and_body)
-  -- The first element is the header.
-  local v, response_header = iterator()
-  -- It should be a table.
-  -- if type(response_header) ~= 'table' then return nil, format('Invalid header: %s (table expected)', type(response_header)) end -- disabled as is an extraneous check
-  -- Check if the response is the one corresponding to the current
-  -- stream ID.
-  if response_header[packet_keys.sync] ~= self.sync_id then
-    return nil,
-    format('Mismatch of response and request ids. req: %d res: %d.',
-           self.sync_id,
-           response_header[packet_keys.sync])
-  end
-  -- Handle the response body.
-  local response_body
-  v, response_body = iterator()
+  response_header,response_body = msgpack_unpack(header_and_body)
   -- If not a table then is empty.
-  if type(response_body) ~= 'table' then
-    response_body = {}
-  end
+  if type(response_body) ~= 'table' then return nil,"non-table response" end -- used to set to {}
   -- Return the response as a table with the data and the metadata.
-  return { code = response_header[packet_keys.type],
-           data = response_body[packet_keys.data],
-           error = response_body[packet_keys.error],
-         }
+  local response = {
+    code = response_header[packet_keys.type],
+    data = response_body[packet_keys.data],
+  }
+  if response_body[packet_keys.error] then
+    response.error = response_body[packet_keys.error]
+    response.trace = util.Serialise(response_body[52])
+  end
+  return response
 end
 
 --- Perform the authentication with the tarantool server.
@@ -906,14 +890,14 @@ end
 function M.call(self, proc, args)
   -- Issue the request.
   local response, err = tnt_request(self,
-                                { [packet_keys.type] = command_keys.call[self.call_semantics] or error('Incorrect value for "call_semantics" option') },
-                                { [packet_keys.function_name] = proc,
-                                  [packet_keys.tuple] = args } )
-  -- Handle the error if it occurs.
+	{ [packet_keys.type] = command_keys.call[self.call_semantics] or error('Incorrect value for "call_semantics" option') },
+	{ [packet_keys.function_name] = proc,
+		[packet_keys.tuple] = args } )
+-- Handle the error if it occurs.
   if err then
     return nil, err
   elseif response and response.code ~= response_keys.ok then
-    return nil, response and response.error or 'Internal error.'
+    return nil, response.error or 'Internal client error', response.trace
   else
     -- Return the response data.
     return response.data
