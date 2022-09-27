@@ -149,6 +149,9 @@ function GetPost() -- REFACTOR: shoud be type specific
 		local form,err = ngx_req_get_post_args()
 		if err then return scribe.Error{realm="form",title="Reqargs urlencoded form error: "..err} end -- TODO: option to not throw
 		-- errors are only typical if client_body_buffer_size and client_max_body_size do not match
+		for key,value in pairs(form) do
+			if value =="" then form[key] = nil end
+		end
 		request.form = form
 	elseif request.type =="multipart/form-data" then
 		local multipart_options = util_MergeIf(openresty.multipart, page.post)
