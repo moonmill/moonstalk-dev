@@ -118,6 +118,7 @@ function Request() -- request can be built in the server, typically by calling t
 		-- we don't handle the scenario of a missing site, as the generic application adds a final curator to handle that
 	end
 	_G.site = site
+	log.Info() if not node.production and site.domains[request.domain] and site.domains[request.domain].staging then site.domain = request.domain end -- ensures staging domains are used in place of the default; must check if domain is defined as wildcard domains will not and can not be used for staging; only enabled with high log level thus typically not on production servers
 
 	-- # Routing etc : Map the view/controller
 	page.state = 2
@@ -478,7 +479,8 @@ function RequestURL()
 end
 
 -- the following all return false so that one can use return NotFound() in a controller and thus prevent the view from running
-function Redirect (url,code)
+function Redirect(url,code)
+	if page.error then return end -- preserve errors
 	local cookies = page.cookies -- needs to preserve for redirect as abandon discards them
 	scribe.Abandon(code or 302)
 	_G.page.cookies = cookies
@@ -487,14 +489,12 @@ function Redirect (url,code)
 	_G.output = {[[<a href="]],url,[[">Redirected to ]],url,[[</a>]],}
 	return false
 end
-function RedirectSecure (address,code)
-	-- unlike Redirect() this does not accept absolute URLs with schema nor domain (URI)
+function RedirectSecure(address,code)
 	-- address may be ommitted and the redirect will be to the current address, thus converting a non-secure URL
 	if page.error then return end -- preserve errors
 	local cookies = page.cookies -- needs to preserve for redirect as abandon discards them
 	scribe.Abandon(code or 302)
 	_G.page.cookies = cookies
-	_G.page.template = nil
 	if not address then address = string_sub(request.path,2) end -- FIXME: request.path should not have the slash prefix as all internal addresses are absolute
 	if request.query_string then
 		page.headers["Location"] = table_concat{"https://",site.domain,"/",address,"?",request.query_string}
@@ -502,7 +502,7 @@ function RedirectSecure (address,code)
 		page.headers["Location"] = table_concat{"https://",site.domain,"/",address}
 	end
 	log.Debug("redirecting to "..page.headers["Location"])
-	_G.output = {[[<a href="]],url,[[">Redirecting to ]],url,[[</a>]],}
+	_G.output = {[[<a href="]],address,[[">Redirecting to ]],address,[[</a>]],}
 	return false
 end
 
@@ -834,11 +834,16 @@ function Site(site)
 	end
 	for _,domain in ipairs(site.domains) do
 		-- domains that redirect are pointed to a new pseudo-site table with a redirect collator
+		site.domains[domain.name] = domain -- allows domain name lookup which is used to check staging domains
+		if domain.staging then
+			-- also see scribe.Request
+			domain.redirect = false
+		end
 		if domain.name ~=site.domain and domain.redirect ~=false and site.redirect ~=false then
 			local redirect_append = domain.redirect_append ==true
 			if not redirect_append and site.redirect_append ==true then redirect_append = true end
 			moonstalk.domains[domain.name] = {urns_exact={},language=node.language, controllers=moonstalk.applications.generic.controllers, views=moonstalk.applications.generic.views, errors={}, urns_patterns={{pattern=".", collate={scribe.RedirectCollator}, redirect= domain.redirect or site.redirect or ifthen(site.secure,"https://"..site.domain,"http://"..site.domain), redirect_append=redirect_append}}} -- a bit convoluted, compared simply an «if site.redirect» in the Request handler however sites that redirect should be rarely used and keeps the Request handler cleaner -- we need urns_exact as binder will evaluate it before attempting the patterns, and we also need language for establishing the page envionrment and controllers for the actual handling
-		else
+		elseif not node.production or not domain.staging then -- only add staging domains on non-production nodes to prevent access to staging features
 			moonstalk.domains[domain.name] = site -- pointer
 		end
 	end
