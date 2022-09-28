@@ -220,7 +220,7 @@ function Request() -- request can be built in the server, typically by calling t
 		end
 		if not unlocked then
 			log.Debug("no key for locks: "..util.ListGrammatical(page.locks))
-			scribe.UserUnauthorised()
+			scribe.Unauthorised()
 		end
 	end
 
@@ -456,7 +456,7 @@ function Token(id)
 	return request.client.id
 end
 
-function UserUnauthorised()
+function Unauthorised()
 	if page.error then return end -- preserve errors
 	if user then
 		scribe.Abandon "generic/unauthorised"
@@ -1021,16 +1021,13 @@ end
 function Abandon() end -- placeholder during intialisation
 do local function RenderAbandon(name,object)
 	if not object then
-		scribe.Error("Couldn't abandon to missing view: "..name)
+		scribe.Error("Couldn't abandon to missing view "..name)
 		return false
 	elseif object.static then
 		write(object.static)
-	else
-		local result,response = pcall(object.loader)
-		if not result then
-			scribe.Error("Couldn't abandon due to error in view: "..object.id.." "..response)
-			return false
-		end
+	elseif not pcall(object.loader) then
+		scribe.Error("Couldn't abandon due to error in view "..object.id..": "..response)
+		return false
 	end
 end
 function AbandonedEditor()
@@ -1038,16 +1035,24 @@ function AbandonedEditor()
 	page.sections = {output="content",content={"",length=1}}
 	_G.output = page.sections.content
 	-- generic views and templates are expected to not fail, thus we fall back to them in case they have been overridden
+	if site.controllers[page.abandoned] and not pcall(site.controllers[page.abandoned].loader) then
+		scribe.Error("Couldn't abandon due to error in controller "..page.abandoned..": "..response)
+		page.abandoned = "generic/error"
+	end
 	if RenderAbandon(page.abandoned, site.views[page.abandoned]) ==false then
-		page.sections.content={"",length=1}
-		_G.output = page.sections.content
-		RenderAbandon(page.abandoned, generic.views[page.abandoned])
+		if page.abandoned =="generic/error" or RenderAbandon(page.abandoned, generic.views.error) == false then -- must check if we've already tried rendering such as in case controller failed; if it failed in eitehr case we still use the template only with serialised error output
+			page.sections.content={util.SerialiseWith(page.errors,"html"),length=1}
+			_G.output = page.sections.content
+		end
 	end
 	scribe.Section"template"
 	if RenderAbandon("template", site.views["template"] or site.views["generic/template"]) ==false then
-		page.sections.template={"",length=1}
-		_G.output = page.sections.template
-		RenderAbandon("template", generic.views.template)
+		if RenderAbandon("template", generic.views.template) ~=false then
+			page.sections.template={"",length=1}
+			_G.output = page.sections.template
+		else
+			_G.output = {util.SerialiseWith(page.errors,"html"),length=1}
+		end
 	end
 	_G.output = table.concat(_G.output)
 end
