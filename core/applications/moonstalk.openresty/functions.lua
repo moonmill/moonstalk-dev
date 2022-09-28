@@ -147,7 +147,7 @@ function GetPost() -- REFACTOR: shoud be type specific
 	if request.type =="application/x-www-form-urlencoded" then
 		moonstalk_Resume(ngx_req_read_body) -- async function (as can be invoked before the full payload has been received)
 		local form,err = ngx_req_get_post_args()
-		if err then return scribe.Error{realm="form",title="Reqargs urlencoded form error: "..err} end -- TODO: option to not throw
+		if err then return scribe.Error{realm="form",title="Urlencoded form error: "..err} end
 		-- errors are only typical if client_body_buffer_size and client_max_body_size do not match
 		for key,value in pairs(form) do
 			if value =="" then form[key] = nil end
@@ -237,11 +237,14 @@ function _Request()
 	}
 	_G.now = request.time
 	if request.query_string then
-		-- it is not notably expensive to parse the query string thus we always do so, unlike the form
+		-- it is not notably expensive to parse the query string thus we always do so, unlike form
 		if string_find(request.query_string,'=',2,true) then
 			-- ?foo&bar=baz = {foo=true,bar=baz}
-			request.query = ngx_req_get_uri_args(10) -- only parses arguments without values (no key=value) e.g. ?aibble+wobble or ?wibble&wobble-wubble as booleans (wibble==true)
-			if request.query[ string_match(request.query_string, "[^%+=&]+") ] ==true then -- the query string contains a mix of + delimited and key-value attributes, openresty only parses the + delimited as booleans, however we shall preserve them in order as well; this test only parses as far as the first + & or = then looks up the value in the table thus is not unduly expensive, however query strings using this mixed attribute scheme are somewhat expensive as they invoke 3 functions calls and an iteration
+			request.query = ngx_req_get_uri_args(16) -- only parses arguments without values (no key=value) e.g. ?wibble+wobble or ?wibble&wobble-wubble as booleans (wibble==true)
+			for key,value in pairs(request.query) do
+				if value =="" then request.query[key] = nil end
+			end
+			if request.query[ string_match(request.query_string, "[^%+=&]+") ] ==true then -- the query string contains a mix of + delimited and key-value attributes, openresty only parses the + delimited as booleans, however we preserve them in order as well; this test only parses as far as the first + & or = then looks up the value in the table thus is not unduly expensive, however query strings using this mixed attribute scheme are somewhat expensive as they invoke 3 functions calls and an iteration
 				local count = 0
 				for argument in string_gmatch(string_match(request.query_string,"(.-)&"),"[^%+&]+") do
 					count = count +1
