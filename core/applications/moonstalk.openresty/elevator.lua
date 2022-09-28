@@ -2,7 +2,7 @@
 -- data/configuration/host.cert and data/configuration/host.key will enable global ssl (all domains)
 -- nginx configuration can be overloaded with the following files
 -- data/configuration/nginx.conf for directives in the root
--- TODO: data/configuration/nginx-server.conf for directives in the server block
+-- TODO: data/configuration/nginx-servers.conf for directives in the server block
 -- expects the readlink command to be available for dev installs if apps are symlinked to a shared install
 
 --[[ TODO: add support for ca certs else http.Request with https requires ssl_verify=false
@@ -103,8 +103,17 @@ elevator.functions.openresty = function ()
 --	"  fastcgi_temp_path /dev/null;",
 	}
 
+	local file,err = io.open("data/configuration/nginx-servers.conf")
+	-- TODO: when nginx/openresty is released on arm64/apple silicon it may be necessary to add the following as an overide:   server_names_hash_bucket_size 64; # for Arm64
+	local overrides_server
+	if file then
+		overrides_server = string.gsub(data, "http {\n", "http {\n"..file:read("*a"))
+		file:close()
+	end
+
 	for name,site in pairs(moonstalk.sites) do
 		table.insert(conf, "  server {")
+		if overrides_server then table.insert(conf, "\n"..overrides_server.."\n") end
 		local domains = {}
 		for _,domain in ipairs(site.domains) do -- TODO: handle ASCII (Punycode) conversion for internationalised domains
 			if string.sub(domain.name,1,1) =="*" then
@@ -136,7 +145,6 @@ elevator.functions.openresty = function ()
 			table.insert(conf, util.FileRead(site.path..'/private/nginx.conf'))
 		else
 			-- provide some defaults
-			-- table.insert(conf, "#  client_max_body_size 32k;\n") -- this does not work becaus enginx only accepts a single declaration thus cannot be overriden by location
 		end
 		-- TODO: for all locations except moonstalk, reject any method that is not GET, thus preventing POSTs with large payloads such as used for a DoS
 		table.insert(conf, "    location ^~ /.well-known/ {root "..site.path.."/;}") -- slightly more efficient than invoking the file regex
@@ -151,7 +159,7 @@ elevator.functions.openresty = function ()
 		-- first call initialises Moonstalk; this is an extremely lightweight check of initialisation to perform with each request without using the only slightly more expensive require mechanism
 		table.insert(conf, [[    location / {
 			content_by_lua_file ]]..openresty.path.."/"..ifthen(logging>3,"server-debug.lua","server.lua")..[[;
-			client_max_body_size 0;
+			client_max_body_size 0; # 0=disabled
 		}]])
 		-- NOTE: the scribe rejects POSTs following curation when not enabled with address.post.maxsize
 		-- TODO: check addresses for any with post and declare seperate locations for them with client_max_body_size = post.maxsize and also apply defaults of client_max_body_size 32k to all other locations

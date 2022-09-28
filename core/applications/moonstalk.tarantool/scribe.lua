@@ -28,6 +28,9 @@ if moonstalk.initialise.coroutines ~=false then
 	-- for async coroutine servers network calls must preserve the global environment
 	local function TarantoolServerMethod(interface,method,is_retry,...)
 		-- generic handler for running application server methods is wrapped by moonstalk.Resune, with an upvalue for the method function itself
+		-- in case of error, a scribe.Error is generated, and we return nil,err just as the procedure should also do
+		-- procedure functions may only return two paramters
+		-- TODO: options to throw (preventing return/continuation), or not generate the error for handling by the routine
 		-- unfortunately we have to do this with every query, even when sequential in the same request, as apparently reusing the socket is not possible -- OPTIMIZE: storing the server connection object in request[interface] = server is not reusable however the references may have been incorrect when original tested, for now we recreate the socket
 		local server,err = ngx.socket.tcp()
 		local result,err = server:connect(interface.host, interface.port, interface.socket_options)
@@ -49,8 +52,7 @@ if moonstalk.initialise.coroutines ~=false then
 			-- retry to establish a new socket and connection
 			log.Info("retrying connection to Tarantool instance '"..interface.role.."' due to: "..err)
 			server:close()
-			result,err = tarantool.ServerMethod(interface,method,true,...)
-			if result then result = {result,err} end -- result is expected to be a table
+			result = {tarantool.ServerMethod(interface,method,true,...)} -- result is expected to be a table for continuation
 		end
 		if result ==nil then
 			--[[ -- FIXME: 

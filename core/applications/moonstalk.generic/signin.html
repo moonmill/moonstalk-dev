@@ -1,7 +1,7 @@
 <div class="content">
 <h1>?(l.signin_h1)</h1>
 
-<? if page.error then ?>
+<? if page.error_message then ?>
 	<p class="error">?(page.error_message)
 <? if page.reminder then
 	if string.find(request.form.email or "","@") then ?>
