@@ -45,6 +45,12 @@ end
 
 do local enabler = tarantool.Enabler
 function Enabler()
+	util.Shell = tarantool.Shell
+	util.Encrypt = tarantool.Encrypt
+	util.Decrypt = tarantool.Decrypt
+	util.EncodeID = util.Encrypt -- OPTIMIZE: use a cheaper scheme than EcnryptID as this is used frequently to construct URLs containing ids
+	util.DecodeID = util.Decrypt -- OPTIMIZE: use a cheaper scheme than EcnryptID as this is used frequently to construct URLs containing ids
+
 	enabler()
 	if not box.space._user.index.name:get{"moonstalk"} then
 		box.schema.user.create("moonstalk", {password=node.secret})
@@ -288,16 +294,23 @@ local decode = digest.base64_decode
 _G.crypto =  require "crypto" -- {package=false} -- bundled
 local encrypt = digest.aes256cbc.encrypt
 local decrypt = digest.aes256cbc.decrypt
-function util.Encrypt(value)
+function Encrypt(value)
 	-- encrypt (aes-256-cbc); base64; substitutes chars (for URL safety)
 	return string_gsub( encode( encrypt(value, secret, iv) ),
 			"[/+]",{['/']="~",['+']="-"})
 end
-function util.Decrypt(value)
+function Decrypt(value)
 	-- NOTE: this is an exposed method as it handles any incoming token value
 	if not value then return end
 	return decrypt( decode(string_gsub( value,"[~-]", {['~']="/",['-']="+"} )), secret, iv )
 end
 end
-util.EncodeID = util.Encrypt -- OPTIMIZE: use a cheaper scheme than EcnryptID as this is used frequently to construct URLs containing ids
-util.DecodeID = util.Decrypt -- OPTIMIZE: use a cheaper scheme than EcnryptID as this is used frequently to construct URLs containing ids
+
+do local popen = require"popen" -- {package=false}; bundled
+function Shell(command,read)
+	local shell = popen(command.." 2>&1")
+	local result = shell:read(read or "*l")
+	shell:close()
+	if result =="" then return end
+	return result
+end end

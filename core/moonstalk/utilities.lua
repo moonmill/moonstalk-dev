@@ -889,8 +889,9 @@ function Copy(outof,a,b,c)
 		replace = b
 		recurse = c if recurse==nil then recurse=true end
 	end
-	if not into or not outof then return end
-	if recurse then
+	if not into or not outof then
+		return
+	elseif recurse then
 		local vtype
 		for k,v in pairs(outof) do
 			vtype = type(v)
@@ -1833,11 +1834,19 @@ function AnyTableHasKeyValue(tables,key,value)
 	end
 end
 function FindKeyValueInTable(attribute,value,items,max)
+	-- returns nil if no matches, the first match, or if max >1 then a table of the matches
+	max = max or 1
+	local count = 0
 	local results = {}
 	for _,record in pairs(items) do
-		if record[attribute] == value then table_insert(results,record) if max and #results >= max then break end end
+		if record[attribute] == value then
+			table_insert(results,record)
+			count = count +1
+			if count ==max then break end
+		end
 	end
-	if #results == 0 then return end
+	if count ==0 then return
+	elseif max ==1 then return results[1] end
 	return results
 end
 
@@ -1846,6 +1855,21 @@ function TableContainsAnyValue(table,values)
 		if table[value] then return true end
 	end
 end
+
+function TableContainsValue(table,find)
+	for key,value in pairs(table) do
+		if value ==find then return key end
+	end
+end
+
+function SubtableContainsValue(tables,find)
+	for key,table in pairs(tables) do
+		for subkey,value in pairs(table) do
+			if value ==find then return key,subkey,value end
+		end
+	end
+end
+
 
 function TableContainsAnyKeyValue(this,those)
 	for key,value in pairs(those) do

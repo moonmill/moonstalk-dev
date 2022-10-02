@@ -193,12 +193,12 @@ function FileItems(attributes)
 	kit.Script ("/moonstalk.kit/jquery.js","/moonstalk.kit/jquery-ui.js","/moonstalk.kit/kit.js","moonstalk_Kit.enableFormTable('#"..attributes.cssid.."')")
 end
 
-function ConvertImage(tenant_token,file,variants)
-	-- all uploads are saved for anonymous access on a private (encoded URL); we assume access is equal across all variants, otherwise each variant would require a separate token
-	-- tenant_token is the folder name or path (e.g. "ghjGH56ghFH/media"), typically the encoded token corresponding a tenant preventing attempts to guess other tenant's directory names in case they should use standardised file names, optionally with a subfolder
-	-- variants is an array of command strings, each of which represents a variant to be saved, using the specified shell command; the command string should includes macros for ?(uploaded) which is the full path of the uploaded file and ?(save) for the path of the saved file (which should then be suffixed with a unique identifier to avoid overwriting other variants)
-	-- NOTE: a directory of "media" must be used with FileItems
-	-- TODO: propagate errors to view/FileItems
+function ConvertImage(file,variants)
+	-- file is a file object from form.files, else {file=path, name=name}
+	-- variants is an array of command strings, each of which represents a variant to be generated and saved, as a shell command; the command string should includes macros for ?(original) which is the full path of a file and ?(variant) as a path suffix of the file to be saved (which following this macro should be suffixed with a unique identifier to distinguish each from the other saved variants)
+	-- variants.prefix = "path" added to the modified path for saved filed; is relative within the moonstalk folder e.g. "applications/name/public/"; defaults to site/public/images
+	-- on success returns the file object with file.id and file.token if not disabled
+	-- variants.tokens = false to disable creating a file.token at the end of the modified path, instead file.name will be used (not advisable with uploads)
 	local info,err = util.Shell(sys.prefix..[[gm identify -format "%m %w %h" ]]..file.file)
 	if not info or string.sub(info,1,12)=="gm identify:" then return nil,"Unknown format "..(err or info) end
 	log.Debug("Processing "..info)
@@ -206,13 +206,14 @@ function ConvertImage(tenant_token,file,variants)
 
 	-- save variants
 	variants = variants or { -- by default we create a medium version at reasonable quality, and a smaller square cropped version which is compressed and intended for a smaller display size (e.g. 160), such that its resolution better utilises high density screens
-		[[gm convert ?(uploaded) -resize 1200^ -colorspace rgb +profile '*' -unsharp 1.0X0.7+0.8+0.01 -quality 80% ?(save)_m.jpg]],
-		[[gm convert ?(uploaded) -resize 320^ -gravity center -extent 320x320 -colorspace rgb +profile '*' -unsharp 1.0X0.7+0.8+0.01 -quality 55% ?(save)_s.jpg]],
-		}
-	local image_path = "public/tenants/"..tenant_token.."/"..file.token
+		[[gm convert ?(original) -resize 1200^ -colorspace rgb +profile '*' -unsharp 1.0X0.7+0.8+0.01 -quality 80% ?(variant)_m.jpg]],
+		[[gm convert ?(original) -resize 320^ -gravity center -extent 320x320 -colorspace rgb +profile '*' -unsharp 1.0X0.7+0.8+0.01 -quality 55% ?(variant)_s.jpg]],
+	}
+	if variants.tokens ~=false then file.id = file.id or util.CreateID(); file.token = file.token or util.EncodeID(file.id) end
+	if not variants.prefix then variants.prefix = site.path.."public/images/"..(file.token or file.name) end
 	local result,err
 	for i,command in ipairs(variants) do
-		command = string.gsub(command, "%?%((%w+)%)", {uploaded=file.file, save=image_path})
+		command = string.gsub(command, "%?%((%w+)%)", {original=file.file, variant=variants.prefix})
 		result,err = util.Shell(sys.prefix..command)
 		if err then log.Notice("Command "..i.." failed : "..err) return nil,err end
 		log.Info(result)
@@ -1289,12 +1290,6 @@ function reader(data,view)
 end
 
 function Editor ()
-	--[[ adds the Script() and other functionality to a page, including support for site.services:
-		analytics -- id
-	and page flags:
-		focusfield -- field name
-		nocache -- true
-	--]]
 	if page.type ~="html" then return end
 	-- # Meta tags
 	if not page.title and page.vocabulary then page.title = page.vocabulary[page.language or client.language].title end

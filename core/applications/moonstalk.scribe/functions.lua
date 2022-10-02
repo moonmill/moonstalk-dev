@@ -24,6 +24,7 @@ default_site = {
 	applications={},
 	redirect=true,
 }
+setmetatable(default_site.editors,{__newindex=function(t,key,value) page.editors={value}; util.Append(site.editors,page.editors) end}) -- permits table.insert(page.editors,Func) converting it to a copy of site.editors with the new function first; further insertions will be last -- NOTE: page.editors={} will disable the site editors
 
 hits = 0
 
@@ -89,7 +90,7 @@ function Request() -- request can be built in the server, typically by calling t
 
 	-- # Scribe globals
 	_G.user = false
-	_G.page = { state=0, status=200, type="html", headers={}, sections={content={"",length=1}, output="content"} } -- TODO: don't create data? -- NOTE: APIs and anything serving other content types must explictly declare the type
+	_G.page = { state=0, status=200, type="html", headers={}, sections={content={"",length=1}, output="content"}, editors=site.editors } -- NOTE: APIs and anything serving other content types must explictly declare the type
 	_G.output = page.sections.content
 	local page = page
 
@@ -197,29 +198,32 @@ function Request() -- request can be built in the server, typically by calling t
 	client.language = client.language or site.language
 
 
-	-- # authentication
-	-- this depends upon page.locks which may prevent it, however if a collator wants to perform authentication earlier it may
+	-- # client authentication
+	-- this depends upon page.locks, however may be disabeld with locks=false; a collator may perform authentication earlier; use of locks requires authenticator="namespace.Function", either inherited from site, specified on an address, or added to the page as a page.Authenticator function by a collator
 	if page.locks then
 		page.state = 5
-		if (client.id or request.form.action =="Signin") and (page.Authenticator or site.Authenticator) then (page.Authenticator or site.Authenticator)() end -- disable with address.locks=false if the page uses it's own authentication mechanism such as not employing the request.client.token; Authenticator can be set to false in both cases but if page.Authenticator is given site set to false will be ignored; Authenticators fetch the user identified by the request.client.token and populates the _G.user table generally with at least nick and keychain
-		-- to avoid invoking when unnecessary, either the token cookie needs to be present (i.e. set upon signin) or a token query param needs to be provided which the authenticator will usually attempt to exchange for a corresponding cookie; authenticator functions should not invoke errors if the token is invalid and should generally remove it silently; if a page is locked after invocation the scribe will itself show the authenticate page
-		-- now that we may have a user, we can validate against page if locked
-		page.headers['Cache-Control'] = "no-cache" -- nothing with authentication restrictions should be cached; this is currently implemented by Kit
-		page.headers.Vary = util.AppendToDelimited("Cookie", page.headers.Vary, ",") -- ensure caches refresh protected content when requested with a cookie
+		page.Authenticator = page.Authenticator or site.Authenticator
 		local unlocked
-		if not next(page.locks) then
-			unlocked = true
-		else
-			for _,key in ipairs(page.locks) do
-				if request.client.keychain[key] then
-					unlocked = true
-					log.Debug("unlocked with key: "..key)
-					break
+		if (client.id or request.form.action =="Signin") and page.Authenticator and page.Authenticator() then -- authenticator functions must return true if they succeed in getting a user; error cases should return scribe.Error; authenticators fetch the user identified by the request.client.token and populate the _G.user table generally with at least nick and a keychain
+			-- to avoid invoking when unnecessary, either the token cookie needs to be present (i.e. set upon signin) or a token query param needs to be provided which the authenticator will usually attempt to exchange for a corresponding cookie; authenticator functions should not invoke errors if the token is invalid and should generally remove it silently; if a page is locked after invocation the scribe will itself show the authenticate page
+			-- now that we may have a user, we can validate against page if locked
+			page.headers['Cache-Control'] = "no-cache" -- nothing with authentication restrictions should be cached; this is currently implemented by Kit
+			page.headers.Vary = util.AppendToDelimited("Cookie", page.headers.Vary, ",") -- ensure caches refresh protected content when requested with a cookie
+			if not next(page.locks) then -- running the 
+				unlocked = true
+			else
+				for _,key in ipairs(page.locks) do
+					if request.client.keychain[key] then
+						unlocked = true
+						log.Debug("unlocked with key: "..key)
+						break
+					end
 				end
 			end
+		log.Debug() elseif not page.Authenticator then log.Debug("no authenticator available")
 		end
 		if not unlocked then
-			log.Debug("no key for locks: "..util.ListGrammatical(page.locks))
+			log.Debug() if page.locks then log.Debug("no key for locks: "..util.ListGrammatical(page.locks)) end -- may have been removed by abandoned error
 			scribe.Unauthorised()
 		end
 	end
@@ -259,22 +263,23 @@ function Request() -- request can be built in the server, typically by calling t
 
 
 	-- # Post-processing
-	if page.modified and not page.locks then -- POST invalidates cached pages thus last-modified is ignored
+	if page.modified and not page.locks then -- POST invalidates cached pages in browsers thus resulting in last-modified being ignored so we do not need to handle
 		page.headers["Last-Modified"] = page.headers["Last-Modified"] or util_HttpDate(page.modified or page.created) -- don't change if already set, otherwise nil if no dates; must disable when logging>4 to prevent webserver sending 304 not-modified
 	end
-	page.headers["Content-Type"] = types.content[page.type] or page.type
-	page.headers["Content-Language"] = page.language
+
 	page.headers["X-Powered-By"] = scribe_xpowered
 
-	if page.editors ~=false then
-		-- editors can be applied to any content-type, thus they must check the type themselves
-		log.Debug() page.state = 10
-		for _,Editor in ipairs(page.editors or site.editors) do
-			log.Debug("applying Editor "..(site.editors[Editor] or "from page"))
+	if page.editors then
+		-- editors are applied to all content-types, thus they must check this themselves
+		page.state = 10
+		for _,Editor in ipairs(page.editors) do
+			log.Debug("applying "..(site.editors[Editor] or "page")..".Editor")
 			Editor()
 		end
 	end
 
+	page.headers["Content-Language"] = page.language
+	page.headers["Content-Type"] = types.content[page.type] or page.type
 	if page.cookies then scribe.SetCookies() end
 
 	-- if page.error and not page.abandoned then
@@ -787,8 +792,7 @@ function Sites()
 end
 
 function Site(site)
-	-- this is used to normalise and add sites, usually by site providers when invoked from application.Sites()
-
+	-- this is used to normalise and add sites, usually by site providers when invoked from application.Sites()	
 	if not scribe.enabled then scribe.Enable(); scribe.enabled = true end -- prepare apps for sites
 	moonstalk.sites[site.id] = site
 
@@ -809,6 +813,7 @@ function Site(site)
 	end
 
 	scribe.ConfigureBundle(site,"sites")
+
 	if util.Encrypt then -- FIXME: as tenants and sites can have folders named with the taoken for public access strictly the elevator envionrment needs these functions as well as servers, thus utils_dependant needs a Lua native aes256-cbc module that is replaced by servers
 		site.token = site.token or util.Encrypt(site.id)
 		moonstalk.site_tokens[site.token] = site
@@ -869,7 +874,7 @@ function Site(site)
 
 	-- populate the site's applications
 	if node.applications then for _,app in ipairs(node.applications) do util.ArrayAdd(site.applications,app) end end
-	util.ArrayAdd(site.applications,"generic") -- required application, but loads last so that its resources may be overridden
+	util.ArrayAdd(site.applications,"generic") -- required application, but loads last so that its resources may be overridden (by being already specified)
 
 	for _,name in ipairs(site.applications) do scribe.EnableSiteApplication(site,name) end
 
@@ -914,7 +919,7 @@ function EnableSiteApplication(bundle,name,dependent)
 	-- can only be called once all apps are enabled -- TODO: there is currently no mechanism for Site functions to wait for all Starters to finish (e.g. once a db connection is established), this would potentially require a new app.Ready function
 	if bundle.applications[name] then return end -- already enabled
 	local application = moonstalk.applications[name]
-	if not application then moonstalk.Error{bundle, level="Notice", id=name, title="  application '"..name.."' was not found"} return end
+	if not application then return moonstalk.Error{bundle, level="Notice", id=name, title="  application '"..name.."' was not found"} end
 	if not dependent then
 		log.Debug("  enabling "..name)
 	else
@@ -932,14 +937,13 @@ function EnableSiteApplication(bundle,name,dependent)
 	for urnname,urn in pairs(application.urns_exact) do
 		-- copy pointers to the app's matches= addresses
 		local replace
-		if bundle.urns_exact[urnname] then
-			if bundle.urns_exact[urnname] ==false then log.Debug("  "..urnname .. " cannot be replaced by "..application.id)
-			else
-				urn = copy(urn) -- because site values need to be propagated into it
-				if replace then log.Info("  "..urnname .. " replaced by "..application.id) end
-				if bundle.secure and urn.secure ==nil then urn.secure = true end -- propogate the secure flag to the apps urn
-				bundle.urns_exact[urnname] = urn
-			end
+		if bundle.urns_exact[urnname] ==false then
+			log.Debug("  "..urnname .. " cannot be replaced by "..application.id)
+		else
+			urn = copy(urn) -- because site values need to be propagated into it
+			if replace then log.Info("  "..urnname .. " replaced by "..application.id) end
+			if bundle.secure and urn.secure ==nil then urn.secure = true end -- propogate the secure flag to the apps urn
+			bundle.urns_exact[urnname] = urn
 		end
 	end
 	for _,urn in ipairs(application.urns_patterns) do -- copy all the app's pattern addresses after each other; the first-specified app's addresses take precedence, and the order of addresses is preserved -- TODO: post-sort by priority?
@@ -1068,7 +1072,7 @@ function _Abandon(to)
 	log.Info("Abandoning to "..(to or "[empty]").." from "..(page.address or request.path or '-none-'))
 	if page.abandoned then return end -- no need to reset all the atributes again in case there's multiple errors
 	page.abandoned = to
-	page.headers = EMPTY_TABLE
+	page.headers = {}
 	page.type = "html"
 	page.locks = false
 	page.collate = false
@@ -1088,13 +1092,18 @@ end end
 
 function Errored(err,trace)
 	-- handles an error caught interrupting scribe.Request
-	err = {title="Error in "..scribe.states[page.state], detail=err}
+	local state = scribe.states[page.state]
+	err = {title="Error in "..state, detail=err}
+	if type(page[state]) =='string' then
+		err.title = err.title .." '".. page[state] .."'"
+	end
 	if trace then
 		scribe.Errorxp(err)
 	else
 		scribe.Error(err)
 	end
 	scribe.AbandonedEditor()
+	page.headers["Content-Type"] = page.headers["Content-Type"] or "text/html"
 end
 
 function Error(err)
@@ -1103,7 +1112,7 @@ function Error(err)
 	if type(err) ~="table" then err = {scribe, title=tostring(err)}
 	elseif not err[1] then err[1] = scribe end
 	-- TODO: aggregrate into bundle errors as per moonstalk.error, or delegate
-	log.Info(table.concat({err[1].id, err.title or "",err.detail}," | "))
+	log[err.level or 'Info'](table.concat({err[1].id, err.title or "",err.detail}," | "))
 	if moonstalk.ready then err.at = request.url or scribe.RequestURL() end
 	if err.title =="true" or err.detail==true then return end -- already caught
 	err.instance = moonstalk.instance -- when in a cluster where errors are collected centrally
@@ -1112,6 +1121,7 @@ function Error(err)
 	page.error = page.error or {} -- we don't currently collect more than one error, but it is possible for multiple to occur such as when a view and template fail
 	table.insert(page.error,err)
 	scribe.Abandon "generic/error"
+	return nil,err.title
 end
 
 function Errorxp(err)
@@ -1661,7 +1671,7 @@ function ConfigureBundle(bundle,kind)
 			end
 		end
 	end
-	log.Info("  "..counts.views.." views, "..counts.controllers.." controllers, and "..count.." addresses of which "..counts.addresses.." auto, and "..translated.." translated")
+	if counts.views>0 or counts.controllers >0 or count >0 then log.Info("  "..counts.views.." views, "..counts.controllers.." controllers, and "..count.." addresses of which "..counts.addresses.." auto, and "..translated.." translated") end
 end
 
 function GetTablePath(path)

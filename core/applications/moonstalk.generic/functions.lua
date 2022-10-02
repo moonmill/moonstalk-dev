@@ -190,10 +190,10 @@ function Authenticator()
 	if request.post and request.form.action =="SignIn" then
 		-- establish a user session
 		-- in this model, the signin action preserves its location, thus are a change-state post to any page; in other models a post is made to a specific page with a query param specifying the original page to redirect to on success; signout on the other hand requires a post to the /signout address as it will generally result in a redirect
-		return generic.SignIn() -- FIXME: must change the view if failed etc
+		if not generic.SignIn() then return end -- FIXME: must change the view if failed etc
 	elseif client.token then
 		-- has a user session
-		generic.Authenticate() -- FIXME:
+		if not generic.Authenticate() then return end -- FIXME:
 	end
 	if not client.preferences and request.headers.cookie then
 		-- no user session, fallback to a preferences cookie; applies also if the above failed
@@ -230,6 +230,7 @@ function Authenticator()
 		end
 		-- if there's still no language, moonstalk.Environment will simply default to the site.language and locale
 	end
+	return true
 end
 
 function Authenticate()

@@ -158,7 +158,7 @@ elevator.functions.openresty = function ()
 		-- finally we handle everything else with moonstalk, this is actually a prefix match so it will match every request, but the longest is used is another prefix matches, or if no regex matches this is thus the longest prefix
 		-- first call initialises Moonstalk; this is an extremely lightweight check of initialisation to perform with each request without using the only slightly more expensive require mechanism
 		table.insert(conf, [[    location / {
-			content_by_lua_file ]]..openresty.path.."/"..ifthen(logging>3,"server-debug.lua","server.lua")..[[;
+			content_by_lua_file ]]..openresty.path.."/private/"..ifthen(logging>3,"server-debug.lua","server.lua")..[[;
 			client_max_body_size 0; # 0=disabled
 		}]])
 		-- NOTE: the scribe rejects POSTs following curation when not enabled with address.post.maxsize

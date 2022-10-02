@@ -1,11 +1,11 @@
 --[[ Moonstalk Databin database system
-provides a rudimentary database using luabins serialisation; tables are simply in-memory lua tables, loaded on startup and serialised to disk on shutdown
+provides unmanaged data storage using luabins serialisation; tables are simply in-memory lua tables, loaded on startup and serialised to disk on shutdown or on-demand
 
 if no other suppported database system is discovered node.databases.default = {system="databin"} is automatically set upon Moonstalk installation
 
 to use, simply specify in schema.lua:
-	table_name = {} -- default: {system="databin", autosave="scribe"}
-	autosave is the name of a server for which the table shall be saved upon termination, providing the server only has 1 instance
+	table_name = {} -- default: {system="databin", autosave="scribe", autoload={""}}
+	autosave is the name of a server for which the table shall be saved upon termination, providing the server only has 1 instance; =false if saved on demand after changes
 
 there is no need to specify fields as db.table_name is serialised in its entireity; however be aware that copies (pointers) of tables shared between databases will be duplicated
 WARNING: saving is only autmatic not compatible for saving with multiple nginx workers as an internal sync mechanism would be required and a single instance made authoratative
@@ -104,7 +104,7 @@ function Enabler()
 	for name,table in pairs(moonstalk.databases.tables) do
 		table.system = table.system or "databin"
 		table.autosave = table.autosave or autosave_default
-		if table.system =="databin" and (not table.autoload or util.ArrayContainsValue(table.autoload, moonstalk.server)) then
+		if table.system =="databin" and (table.autoload==nil or util.ArrayContainsValue(table.autoload, moonstalk.server)) then
 			databin.managing = databin.managing +1
 			if table.autosave ==moonstalk.server then
 				databin.autosave = true
@@ -145,7 +145,7 @@ function Shutdown()
 	local count = 0
 	for name,table in pairs(moonstalk.databases.tables) do
 		if table.system =="databin" then
-			if _G.db[name] and table.autosave ==moonstalk.server and node[table.autosave] and (node[table.autosave].instances or 1) ==1 then
+			if _G.db[name] and (node[table.autosave].instances or 1) ==1 and (table.autosave ==nil or (table.autosave ==moonstalk.server and node[table.autosave])) then
 				count = count +1
 				databin.Save(name, _G.db[name])
 			elseif not table.autosave then

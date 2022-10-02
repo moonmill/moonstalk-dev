@@ -94,10 +94,16 @@ for _,bundle in pairs(moonstalk.applications) do
 		-- are imported in server but we must parse the file for function name declrations to enable as proxies, because compiling tarantool files is not possible outside its environment
 		local data,err = util.FileRead(bundle.files["tarantool.lua"].path)
 		if not data then return moonstalk.Error{bundle, title="Error reading functions for Tarantool",detail=err} end
-		for name in string.gmatch(data,"function ([^( ])") do
+		for name in string.gmatch(data,"function ([^( ]+)") do
 			if not string.find(name,".",1,true) then
-				log.Debug("  procedure: "..bundle.id.."."..name)
-				do local procedure = name; bundle[procedure] = function(...) return tarantool.Run(bundle.id,procedure,...) end end -- FIXME: needs to be associated with default server
+				if bundle[name] then
+					if not moonstalk.reserved[name] then
+						log.Debug("  procedure does not replace function: "..bundle.id.."."..name)
+					end
+				else
+					log.Debug("  procedure: "..bundle.id.."."..name)
+					do local procedure = name; bundle[procedure] = function(...) return tt.default(bundle.id.."."..procedure,...) end end
+				end
 			end
 		end
 	end

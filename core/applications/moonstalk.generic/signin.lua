@@ -1,5 +1,3 @@
-log.Alert(request.error or "no err")
-
 if user and page.view =="generic/signin" then
 	-- an edge case of having just signed in from the signin address
 	scribe.Redirect ( request.query_string or "/my/account" )
