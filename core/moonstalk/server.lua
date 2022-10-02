@@ -15,7 +15,6 @@ _G.db = {} -- the public interface for table-field retrieval, is structured by d
 _G.model = {} -- a public interface used by some database systems to provide model conversion with named records from the schema e.g. model[record](…) will convert from/to the internal database structure; note that this should be performed transparently when using db or cache
 _G.site = {} -- strictly this is scribe specific, but in the teller we propogate it with Environment()
 _G.logging = 4
-_G.EMPTY_TABLE = {} -- TODO: if node.debug set a metatable that throws an error when modified
 
 -- moonstalk tables
 _G.moonstalk = {
@@ -33,6 +32,7 @@ _G.moonstalk = {
 	site_packaged = {}, -- last packaged timestamp; if any packaging dependent file exceeds this, packaging is invoked
 	errors = {significance=10},
 	files = {"functions.lua","elevator.lua","settings.lua","server.lua","request.client.lua", },
+	reserved = {"Loader","Enabler","Starter","Shutdown"}, -- reserved keys
 	globals = {site=true,locale=true,request=true,output=true}, -- "site","locale","request","output" are the defaults and must be declared as keys to avoid warnings when setting them; all in the array part of the table will be preserved and restored when using moonstalk.Resume before and after a coroutine yields; server environments and applications may add their own globals as names to the array with append({"global_name", …}, moonstalk.globals); globals must be used sparingly as they must be iterated for each request and each coroutine yield to both preserve and restore them using the Resume function; Resume is only defined in Initialise() so that this modified table may be consumed as an upvalue after being modified by any application that may append
 	require = {"core/?.lua","core/applications/?.lua","applications/?.lua"},
 	loaders = { -- moonstalk.AddLoader()
@@ -40,6 +40,8 @@ _G.moonstalk = {
 		html={},
 	},
 }
+_G.enum = {}
+setmetatable(_G.enum, {__newindex=function(t,key,value) assert(not t[key],"cannot assign enums to "..key.." as is already claimed"); rawset(t,key,value) end})
 
 moonstalk.path = table.concat(moonstalk.require,";")..";"..package.path -- not to be confused with moonstalk.root; used exclusively by util.ModulePath for import() include()
 table.insert(package.loaders,3,package.loaders[2])
@@ -71,6 +73,12 @@ require "moonstalk/utilities" -- {package=false}
 require "moonstalk/logger" -- must be after utilities as we need that to load with the conditional functions and this requires it as well
 dofile "core/globals/Attributes.lua"
 
+_G.EMPTY_TABLE = {} -- TODO: if node.debug set a metatable that throws an error when modified
+if not node.production and node.logging >=3 then
+	setmetatable(_G.EMPTY_TABLE,{__newindex=function(_,key) moonstalk.Error{title="Attempt to assign key on reserved reused EMPTY_TABLE: "..key, level="Alert"} end})
+end
+
+keyed(moonstalk.reserved)
 host.servers = keyed(copy(node.servers))
 host.roles = keyed(copy(node.roles or {})) -- allows discovery of local roles, e.g. for database queries, if a table's role, is local it can be queried on the local server, not a remote one
 moonstalk.root = util.Shell("pwd") -- we can run with sudo, which does not have the original env variables
@@ -89,7 +97,7 @@ moonstalk.defaults.applications = {
 	errors={significance=10,},
 	files={},
 	sequence={},
-	enum={},
+	enum=_G.enum,
 }
 
 -- # language localisation functions -- TODO: move to kit or internationalisation app
@@ -166,8 +174,6 @@ function moonstalk.GetBundles (path)
 end
 
 do
-	local function PreprocessLocalEnum(data,bundle) return "local enum = moonstalk.bundles['"..bundle.id.."'].enum;"..data end -- makes enum lookups and assignments possible without using the bundle namespace, and without needing a metatable, when provided as a preprocessor to import; e.g. enum.name.value instead of bundle.enum.name.value; we call this using an inline emphemeral funciton that inherits the bundle as an upvalue, as a preprocessor otherwise has no context
-
 	function moonstalk.ReadBundle (bundle)
 		-- loads the core .lua bundle files (settings, functions)
 		-- TODO: all our internal vars should be stored somewhere other than the bundle's table as they're too easily replaced in it by the bundle's own values
@@ -189,7 +195,8 @@ do
 		local imported,err
 		-- must explicitly load settings if present before processing
 		if bundle.files["settings.lua"] then
-			imported,err = util.ImportLuaFile(bundle.path.."/settings.lua", bundle, function(data) return PreprocessLocalEnum(data,bundle) end)
+			imported,err = util.ImportLuaFile(bundle.path.."/settings.lua", bundle)
+			bundle.enum = nil
 			if err then
 				moonstalk.Error{bundle,title="Error loading settings for "..bundle.id,detail=err}
 			else
@@ -213,7 +220,8 @@ do
 		if bundle.files["schema.lua"] then
 			log.Debug("  schema")
 			local err
-			bundle.schema,err = import(bundle.path.."/schema.lua", nil, function(data) return PreprocessLocalEnum(data,bundle) end)
+			bundle.schema,err = import(bundle.path.."/schema.lua",{enum=_G.enum}) -- enum is a pointer to reallocate to the global table, which we then remove as is not a schema table
+			bundle.schema.enum = nil
 			if err then moonstalk.Error{bundle,title="Error in schema", detail=err, class="lua"} return end
 		elseif not bundle.schema then return
 		else log.Debug("  schema")
@@ -335,7 +343,7 @@ function moonstalk.LoadApplications(folder)
 			moonstalk.BundleError(moonstalk, {realm="bundle",title="Cannot load duplicate application name: "..application.id})
 		else
 			moonstalk.applications[application.id] = application
-			copy(moonstalk.defaults.applications, application, false,false)
+			copy(moonstalk.defaults.applications, application)
 			if application.global ~=false then
 				_G[application.id] = application -- must be before load so that files can reference its own namespace (e.g. settings)
 				if application.namespace then
@@ -845,6 +853,7 @@ function moonstalk.Initialise(options)
 		log.Debug("Resume is maintaining "..globals_count.." supplementary moonstalk.globals: "..table.concat(moonstalk.globals,", "))
 		keyed(moonstalk.globals)
 	end
+	setmetatable(_G.enum,nil)
 	keyed(moonstalk.files)
 end
 end
