@@ -56,7 +56,7 @@ end
 util.EncodeID = util.Encrypt -- OPTIMIZE: use a cheaper scheme than EcnryptID as this is used frequently to construct URLs containing ids
 util.DecodeID = util.Decrypt -- OPTIMIZE: use a cheaper scheme than EcnryptID as this is used frequently to construct URLs containing ids
 
-multipart = { -- can be changed globally by setting openresty.multipart[key] or simply pass changed values to openresty.GetPost{max_file_size=10000000, timeout=30000}
+multipart = { -- can be changed globally by setting openresty.multipart[key] or simply set on the address post={max_file_size=10000000, timeout=30000, max_file_uploads=2}
 	tmp_dir          = "temporary/upload",
 	timeout          = 1000, -- millisecs
 	chunk_size       = 4096,
@@ -127,7 +127,8 @@ function Starter()
 	end
 	openresty.Request = openresty._Request -- we must only handle requests after the moonstalk environment is fully ready which includes other Starters, thus we return an anonymous finaliser that is run only once all starters have completed
 	openresty._Request = nil
-	util.FileRead = openresty._util_FileRead
+	util.FileRead = openresty.FileRead
+	util.Shell = openresty.Shell
 end end
 
 local moonstalk_Resume = moonstalk.Resume
@@ -139,10 +140,9 @@ local ngx_req_get_body_data = ngx.req.get_body_data
 local util_MergeIf = util.MergeIf
 local pairs = pairs
 function GetPost() -- REFACTOR: shoud be type specific
-	-- multipart_options = false to parse only urlencoded (e.g. for lighweight payloads such as signin)
 	-- transparently handles file buffering to disk, which can also be configured in nginx.conf per https://github.com/bungle/lua-resty-reqargs
 	-- check request.form._error or the second return argument
-	-- causes processing to wait for the body to be received (it is thus preferable to call after having performed authentication and otehr preparatory database calls once more or all of the body is likely to have been received, e.g. call it from a controller)
+	-- causes processing to wait for the body to be received (it is thus preferable to call after having performed authentication and other preparatory database calls once more or all of the body is likely to have been received, e.g. call it from a controller)
 	local request = _G.request
 	if request.type =="application/x-www-form-urlencoded" then
 		moonstalk_Resume(ngx_req_read_body) -- async function (as can be invoked before the full payload has been received)
@@ -159,6 +159,7 @@ function GetPost() -- REFACTOR: shoud be type specific
 		if not get and form then return scribe.Error{realm="form",title="Multipart upload error: "..form} end -- nil,error -- TODO: option to not throw
 		request.form = form
 		if files then
+			form.files = files
 			for key,item in pairs(files) do -- TODO: create a timer function/worker that removes these files when the request is done unless flagged file.remove=false
 				-- normalise; {field.name={name="original-filename.extension", file="path/to/temp/file"},…}
 				if item.size >0 then
@@ -166,10 +167,11 @@ function GetPost() -- REFACTOR: shoud be type specific
 					item.name = item.file
 					item.file = moonstalk.root.."/"..item.temp
 				else
-					form.files[key] = nil
-					os.remove(item.file) -- FIXME: empty files should not be saved by reqargs!
+					-- form.files[key] = nil
 				end
 			end
+			page.editors = page.editors or {}
+			table.insert(page.editors, openresty.RemoveUploads)
 		end
 	elseif request.type =="application/json" then
 		moonstalk_Resume(ngx_req_read_body)
@@ -184,20 +186,36 @@ function GetPost() -- REFACTOR: shoud be type specific
 	return "form"
 end end
 
+function RemoveUploads()
+	log.Debug("removing uploaded files")
+	for _,file in pairs(request.form.files) do
+		os.remove(file.temp)
+	end
+end
+do
+	local scribe_AbandonedEditor = scribe.AbandonedEditor -- wrapping it ensures even in the case of an error we remove uploaded files
+	scribe.AbandonedEditor = function()
+		if request.form.files then openresty.RemoveUploads() end
+		scribe_AbandonedEditor()
+	end
+end
+
 do
 local concurrency = 0
 local ngx_print = ngx.print
 local ngx_exit = ngx.exit
+local ngx_header = ngx.header
 function Respond() -- this could be optimised to be inline in content_by_lua_block thus eliminating another function call, though it's log function would not be conditionally stripped, nor would upvalues be usable
 	-- requires page.status, page.headers and output
 	local ngx = ngx
-	for name,value in pairs(page.headers) do ngx.header[name]=value end -- OPTIMIZE: can ngx.header be a local?
+	for name,value in pairs(page.headers) do ngx_header[name]=value end -- OPTIMIZE: can ngx.header be a local?
 	ngx.status = page.status
 	ngx_print(_G.output)
 	concurrency = concurrency -1
 	log.Debug("request completed with status "..page.status)
 	log.Info() ngx.update_time(); page.headers["X-Moonstalk"] = table.concat{page.headers["X-Moonstalk"] or "", "; walltime=",util.Decimalise(ngx.now() - request.time,4)}
 	ngx_exit(200)
+	-- TODO: it would be good if editors could set page.finalisers that because we've now responded can use async mechanisms without the overhead of moonstalk.Resume, such as to do file cleanups, do syncs, send data, etc
 end
 
 
@@ -230,7 +248,7 @@ function _Request()
 		scheme =ngx.var.scheme, -- protocol http or https
 		secure =ngx.var.scheme=="https",
 		agent =ngx.var.http_user_agent or "", -- not always present
-		client = {ip=ngx.var.remote_addr, keychain={}},
+		client = {ip=ngx.var.remote_addr, keychain=EMPTY_TABLE},
 		cookies= {},
 		-- form is specified in scribe as EMPTY_TABLE, then replaced by GetPost when required
 		headers =ngx_req_get_headers(), -- transforms to lowercase but also provides a metatable to handle mixedcase and underscore variants -- TODO: use a metatable that only fetches from ngx.var[name] but has to transform dashes to underscore
@@ -283,13 +301,13 @@ function ResolveMX(domain,priority)
 end
 
 do local openresty_shell = require "resty.shell" -- {package=false}; bundled
-function util.Shell(command,read) -- replaces util.Shell for native non-blocking support
+function Shell(command,read) -- replaces util.Shell for native non-blocking support
 	local ok, stdout, stderr = moonstalk_Resume(openresty_shell.run,command) -- ok, stdout, stderr, reason, status
 	return stdout or stderr	-- the original behaviour is to return stdout or stderr; it is up to the caller to determine what is being returned by way of string inspection
 end end
 
 do local util_FileRead = util.FileRead
-function _util_FileRead(path)
+function FileRead(path)
 	return moonstalk_Resume(util_FileRead,path)
 end end
 
