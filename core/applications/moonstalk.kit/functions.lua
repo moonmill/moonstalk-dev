@@ -1314,7 +1314,7 @@ function Editor ()
 		table_insert(script, '\n')
 	else
 		-- we always declare this to avoid the need to use if(window.user) due to otherwise being undefined
-		table_insert(script, "var user=null\n")
+		table_insert(script, "var user=undefined\n")
 	end
 
 	if page.javascript then
@@ -1860,31 +1860,23 @@ function validate.TelephoneCountry(value)
 end end
 
 function validate.Telephone(value,arg)
-	-- TODO: normalised value is e164.number as a string and is clearly identifed by the period versus user-input which might be +number
-	-- will not work in countries where only one period is used in formatting a number
+	-- TODO: returns normalised value as e164.number string which is clearly identifed by the single period versus user-input which might be +number, this function can thus be called with either input or a normalised value
+	-- intended for use in the scribe as uses site.locale to localise non + input, however may be used anywhere, or with a non-site default locale by specifying arg.locale = id, which may of course itself be derived from a select input option
 	-- denormalisation is simple as the country-dot prefix can be removed and replaced with the local trunk access code (e.g. 0) or prefixed with + and the period replaced with a half-space without needing to identify the country code which has a variable length (1–3)
 	-- TODO: arg.allow and arg.disallow (e164 codes)
-	-- does not accept country prefix without +; numbers with + will be normalised to arg.locale.e164 or locale.e164
-	-- also see util.NormaliseTel which stores and accepts a non-delimited number with a default country code
+	-- numbers without + or 00 are normalised without their trunk code to arg.locale.e164 or locale.e164 -- TODO: use a locale specified trunk code as we currently only strip a leading 0
+	-- TODO: denormalise function that removes the country prefix and adds national trunk access code (e.g. 0) if same locale, else simply +; also local number formatting e.g. groups of two digits in france, three digit code plus dashes in NA
 	if not value then return validate.invalid end
 	value = tostring(value)
 
 	local country
-	if string_sub(value,1,1) =="+" then
+	if string_find(value,"^(%d+%.%d+)$") then -- digits with a single period; already normalised
+		return value
+	elseif string_sub(value,1,1) =="+" then
 		value = string_sub(value,2)
 		country = validate.TelephoneCountry(value)
-		if country==validate.invalid then return country end
+		if country ==validate.invalid then return validate.invalid end
 		value = string_sub(value,#country+1)
-	else
-		local periods = string_gmatch(value,"%.")
-		if periods() and not periods() then -- only 1
-			local potential_value
-			country,potential_value = string_match(value,"([%d]+)%.(.+)")
-			if terms.e164[country] then
-				value = potential_value
-			else return validate.invalid end -- we're assuming a single period with an unknown country code is an invalid format
-		-- else has multiple periods
-		end
 	end
 	value = string.gsub(value,"%D","") -- remove all non-digit and formatting except those allowed
 	if not country and string_sub(value,1,2) =="00" then
@@ -1895,10 +1887,9 @@ function validate.Telephone(value,arg)
 	elseif not country and string_sub(value,1,1) =="0" then -- TODO: only if locale has trunk access code
 		value = string_sub(value,2)
 	end
-	if #value >16 then return validate.invalid end -- TODO lookup min length from country prefix, currently only has cell lengths
-	-- TODO: denormalise function that removes the country prefix and adds national trunk access code (e.g. 0) if same locale, else simply +; also local number formatting e.g. groups of two digits in france, three digit code plus dashes in NA
-	local arg_locale = locale
-	if arg and arg.locale then arg_locale = arg.locale end
+	if #value >16 then return validate.invalid end -- TODO lookup min length from country prefix, currently only has mobile lengths, check both cell length and standard length, and if arg.mobile=true then also check prefix
+	local arg_locale
+	if arg and arg.locale then arg_locale = locales[arg.locale] else arg_locale = locales[site.locale] end
 	return (country or arg_locale.e164).."."..value
 end
 validate.Mobile = validate.Telephone -- TODO: use mobile prefix if available

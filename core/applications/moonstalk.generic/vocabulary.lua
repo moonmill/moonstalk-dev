@@ -16,13 +16,70 @@ hr.Ordinal 		= "."
 pt.Ordinal 		= "." -- TODO: handle gender suffix indicators ºª
 es.Ordinal 		= "." -- TODO: handle gender suffix indicators ºª
 
+function vocabulary.en.Ordinal(number)
+	number = tonumber(number)
+	if number ==11 or number==12 or number==13 then
+		return "th"
+	else
+		number = tonumber(string.sub(number,-1))
+		if number==1 then return "st"
+		elseif number==2 then return "nd"
+		elseif number==3 then return "rd"
+		else return "th" end
+	end
+end
+function vocabulary.en.OrdinalHTML(number)
+	number = tonumber(number)
+	if number ==11 or number==12 or number==13 then
+		return "<sup>th</sup>"
+	else
+		number = tonumber(string.sub(number,-1))
+		if number==1 then return "<sup>st</sup>"
+		elseif number==2 then return "<sup>nd</sup>"
+		elseif number==3 then return "<sup>rd</sup>"
+		else return "<sup>th</sup>" end
+	end
+end
+vocabulary.en.OrdinalDay = vocabulary.en.Ordinal
+vocabulary.en.OrdinalDayHTML = vocabulary.en.OrdinalHTML
+
+function vocabulary.fr.Ordinal(number) -- doesn't support gender or plurals
+	if tonumber(number) ==1 then
+		return "er" -- masculine form but correct for numbers without context
+	else
+		return "ème"
+	end
+end
+function vocabulary.fr.OrdinalHTML(number) -- doesn't support gender or plurals
+	if tonumber(number) ==1 then
+		return "<sup>er</sup>" -- masculine form but correct for numbers without context
+	else
+		return "<sup>ème</sup>"
+	end
+end
+function vocabulary.fr.OrdinalDay(number) if tonumber(number) ==1 then return "er" end end
+
+function vocabulary.de.OrdinalDay(number) return "." end
+vocabulary.de.OrdinalDayHTML = vocabulary.de.OrdinalDay
+
+--[[vocabulary.id.OrdinalPre			= -- TODO: handle prefixes
+function(number)
+	number = tonumber(number)
+	if number ==1 then
+		return "pertama"
+	else
+		return "ke-"
+	end
+end--]]
+--ms.OrdinalPre			= id.OrdinalPre
+
 en.numbers	={"one","two","three","four","five","six","seven","eight","nine","ten"}
 fr.numbers	={"un","deux","trois","quatre","cinq","six","sept","huit","neuf","dix"}
 en.WWW		={"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"}
 fr.WWW		={"dimanche", "lundi", "mardi", "mecredi", "jeudi", "vendredi", "samedi"}
 de.WWW		={"Sonntag","Montag","Dienstag","Mittwoch","Donnerstag","Freitag","Samstag"}
 en.WW			={"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"}
-fr.WW			={"dim.", "lundi", "mardi", "mer.", "jeudi", "ven.", "sam."}
+fr.WW			={"dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."}
 de.WW			={"So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"}
 en.W			={"Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"}
 de.W			={"So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"}
@@ -30,12 +87,15 @@ fr.W			={"di", "lu", "ma", "me", "je", "ve", "sa"}
 en.MMM		={"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"}
 fr.MMM		={"janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"}
 de.MMM		={"Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"}
-en.MM			={"Jan.", "Feb.", "March", "April", "May", "June", "July", "Aug.", "Sept.", "Oct.", "Nov.", "De."}
+en.MM			={"Jan.", "Feb.", "March", "April", "May", "June", "July", "Aug.", "Sept.", "Oct.", "Nov.", "Dec."}
 de.MM			={"Jan.", "Feb.", "März", "April", "Mai", "Juni", "Juli", "Aug.", "Sept.", "Okt.", "Nov.", "Dez."}
-fr.MM			={"jan", "févr.", "mars", "avril", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."}
+fr.MM			={"jan.", "févr.", "mars", "avril", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."}
 en.M			={"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}
 de.M			={"Jan", "Feb", "März", "Apr", "Mai", "Juni", "Juli", "Aug", "Sept", "Okt", "Nov", "Dez."}
 fr.M			={"janv", "fév", "mars", "avr", "mai", "juin", "juil", "août", "sep", "oct", "nov", "déc"}
+fr.decimal	=","
+en.decimal	="."
+de.decimal	=","
 
 en['']				="⚑unspecified"
 fr['']				="⚑indéterminé"

@@ -13,7 +13,8 @@ require "md5"
 require "mime" -- {package="mimetypes"}
 bcrypt = require "bcrypt" -- {url="https://raw.githubusercontent.com/mikejsavage/lua-bcrypt/master/rockspec/bcrypt-2.1-4.rockspec"}
 
-_G.json = _json or require "cjson" -- OPTIMISE: nginx uses it's own version so we're actually replacing that
+_G.json = _json or require "cjson" -- {package="lua-cjson"} -- OPTIMISE: nginx uses it's own version so we're actually replacing that
+json.encode_sparse_array(true, nil, 1) -- we do not support sparse arrays, instead these must be intentionally constructed, such as using schema model.*()
 json._decode = json.decode
 do local type=type; local null=json.null
 local function removeNulls(t) -- OPTIMISE: this is only needed in ngx?
@@ -30,40 +31,7 @@ end end
 _G.md5 = _G.md5 or require"md5"
 
 function Enabler()
-	vocabulary.en.Ordinal			= -- TODO: handle unicode ordinal indicators; we can do this in absence of any othe indicator by checking the page.type
-	function(number)
-		number = tonumber(number)
-		if number ==11 or number==12 or number==13 then
-			return "th"
-		else
-			number = tonumber(string.sub(number,-1))
-			if number==1 then return "st"
-			elseif number==2 then return "nd"
-			elseif number==3 then return "rd"
-			else return "th" end
-		end
-	end
-
-	vocabulary.fr.Ordinal			= -- doesn't support gender or plurals
-	function(number)
-		number = tonumber(number)
-		if number ==1 then
-			return "er" -- masculine form but correct for numbers without context
-		else
-			return "ème"
-		end
-	end
-
-	--[[vocabulary.id.OrdinalPre			= -- TODO: handle prefixes
-	function(number)
-		number = tonumber(number)
-		if number ==1 then
-			return "pertama"
-		else
-			return "ke-"
-		end
-	end--]]
-	--ms.OrdinalPre			= id.OrdinalPre
+	-- TODO: handle unicode ordinal indicators; we can do this in absence of any othe indicator by checking the page.type
 
 	local normalised = {}
 	local this
@@ -106,7 +74,7 @@ local table_concat = table.concat
 function Editor ()
 	-- we must provide canonical links on all pages that are not being served from their primary domain or address, to avoid duplicating the web; this is not currently optional
 	if page.status~=200 or page.type~="html" then return end
-	if not node.production then page.headers['x-robots-tag'] = "none" end
+	if node.environment ~="production" then page.headers['x-robots-tag'] = "none" end
 	if (page.canonical and page.canonical~=request.path) or request.domain~= site.domain or (page.secure and request.scheme~='https') then
 		-- TODO: move to page.headers.Link = [[<https://example.com/page-b>; rel="canonical"]] but requires support for multiple declarations
 		_G.output = string_gsub(_G.output, '</head>', table_concat{'<link rel="canonical" href="', ifthen(page.secure,'https',request.scheme), '://', site.domain, page.canonical or request.path, '" />\n</head>'}, 1)
@@ -160,22 +128,22 @@ function SetSession(session)
 	-- client is optional and will always default to having an empty keychain, it provides a reliable way to access values which can be conditional in user, such as keychain, or session-specific values such as when this session was last seen
 	-- error is propagated to and used by signin page
 	-- user only exists if authenticated and is thus the definitive way to check this
-	page.session = session -- anything in session is available from page.session, notably page.session.error
+	page.session = session -- anything in session is available from page.session, notably page.session.error for other values it's better place them in user which gets raised to a global, or client which is merged with request.client
+	local client = request.client
 	local user = session.user
-	local client = session.client or request.client
+	copy(session.client,client,true,false)
 	if user then
 		_G.user = user
-		request.client = client
-		client.ip = request.client.ip
-			-- the follow prefer user values (i.e. persistent settings) but preserve client values (i.e. browser dervived values)
+		-- the following prefers user values (i.e. persistent settings) but will fallback to client values (i.e. browser dervived values) if authentication fails, and in turn site defaults
 		-- TODO: support per-domain defaults instead of per-site (e.g. *.co.uk or uk.* locale=uk)
-		client.language = user.language or site.language
-		client.locale = user.locale or site.locale
-		client.timezone = user.timezone or site.timezone
-		client.keychain = user.keychain or EMPTY_TABLE
+		client.language = user.language
+		client.locale = user.locale
+		client.timezone = user.timezone
+		client.keychain = user.keychain or client.keychain
 		if not user.token then user.token = util.EncodeID(user.id) end -- OPTIMISE: this should be done on demand using a metatable call e.g. local token = user.token or user.token()
 		if client.seen and now > client.seen +time.hour*8 then
-			scribe.Token(client.id) -- if the session hasn't been used for a while force renewal of token expiry, this avoids setting it everytime during a short session; this is slightly redundant when site.token_cookie.expiry is set to a large value but nonetheless still required with low-overhead
+			log.Debug"renewing token expiry"
+			scribe.Token() -- if the session hasn't been used for a while force renewal of token expiry, this avoids setting it everytime during a short session; this is slightly redundant when site.token_cookie.expiry is set to a large value but nonetheless still required and has low-overhead
 		end
 	end
 end

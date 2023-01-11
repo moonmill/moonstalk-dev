@@ -19,6 +19,7 @@ TODO: test other serialisation libraries for loading speed
 
 require"luabins"
 managing = 0 -- count of managed tables
+tables = {}
 
 local luabins_save = luabins.save
 function Save(name,data)
@@ -34,23 +35,30 @@ end
 local luabins_load = luabins.load
 function Load(name,quiet)
 	-- new databases are created in the runner
+	log.Debug("Loading table "..name)
 	local data,err = io.open("data/"..name..".luabins")
+	databin.tables[name] = databin.tables[name] or {adhoc=true}
 	if data then
 		data,err = data:read("*a")
 		if data then
 			err,data = luabins_load(data) -- returns true,data or nil, err
 			if err==nil then err=data else err=nil end
+			databin.tables[name].updated = now
 		end
 	end
 	if err and (not quiet or not string.sub(err,1,12) =="No such file") then return moonstalk.Error{databin, level="Alert", title="Cannot load "..name, detail=err} end
-	return data,err
+	return data
 end
 function Reload(name)
-	if not db[name] or not moonstalk.databases.tables[name] then return moonstalk.Error("Undeclared databins table: "..name)
-	elseif moonstalk.databases.tables[name].autosave ==moonstalk.server then return moonstalk.Error("Cannot reload a databins table which autosaves on this instance: "..name) end
-	local data = databin.Load(name)
-	if not data then return end
-	db[name] = data
+	log.Info() if databin.tables[name].autosave ==moonstalk.server then return moonstalk.Error("Cannot reload a databins table which autosaves on this instance: "..name) end
+	local updated = util.FileModified("data/"..name..".luabins")
+	if updated > databin.tables[name].updated then
+		local data,err = databin.Load(name) or {}
+		if err then return moonstalk.Error{databin, title="Cannot reload table "..name,detail=err,level="Alert"} end
+		db[name] = data or {}
+		return true
+	end
+	return false
 end
 
 do local posix_unistd = require "posix.unistd" -- {package="luaposix"}
@@ -103,23 +111,27 @@ function Enabler()
 	local error
 	for name,table in pairs(moonstalk.databases.tables) do
 		table.system = table.system or "databin"
-		table.autosave = table.autosave or autosave_default
-		if table.system =="databin" and (table.autoload==nil or util.ArrayContainsValue(table.autoload, moonstalk.server)) then
-			databin.managing = databin.managing +1
-			if table.autosave ==moonstalk.server then
-				databin.autosave = true
-			else
-				-- TODO: watch the file and if it changes reload it
-			end
-			local data,error = databin.Load(name,true) or {}
-			if error then
-				moonstalk.BundleError(databin, {databin, log.Priority, title="Cannot load table '"..name.."'", detail=error})
-			else
-				_G.db[name] = data
+		if table.system =="databin" then
+			table.autosave = table.autosave or autosave_default
+			databin.tables[name] = table
+			table.updated = 0
+			if (table.autoload==nil or util.ArrayContains(table.autoload, moonstalk.server)) then
+				databin.managing = databin.managing +1
+				if table.autosave ==moonstalk.server then
+					databin.autosave = true
+				else
+					-- TODO: watch the file and if it changes reload it
+				end
+				local data,error = databin.Load(name,true) or {}
+				if error then
+					moonstalk.BundleError(databin, {databin, log.Priority, title="Cannot load table '"..name.."'", detail=error})
+				else
+					_G.db[name] = data or {}
+				end
 			end
 		end
 	end
-	if databin.autosave and moonstalk.server=="scribe" and moonstalk.scribe.instances >1 then
+	if databin.autosave and moonstalk.server=="scribe" and node.scribe.instances >1 then
 		moonstalk.Error{databin, title="Autosave is disabled because multiple scribe instances are in use"}
 		databin.autosave = false
 	elseif databin.managing >0 and not databin.autosave then
@@ -140,18 +152,21 @@ function Elevator()
 end
 
 function Shutdown()
-	if not databin.managed then return log.Notice"Shutting down without autosaving tables due to interrupted startup" end
+	if not moonstalk.ready then return log.Notice"Shutting down without autosaving tables due to interrupted startup"
+	elseif databin.autosave ==false then
+		return log.Info"Autosaving tables is disabled"
+	elseif databin.managing ==0 then return end
 	local started = os.time()
 	local count = 0
 	for name,table in pairs(moonstalk.databases.tables) do
 		if table.system =="databin" then
-			if _G.db[name] and (node[table.autosave].instances or 1) ==1 and (table.autosave ==nil or (table.autosave ==moonstalk.server and node[table.autosave])) then
+			if _G.db[name] and (table.autosave ==nil or table.autosave ==moonstalk.server) then
 				count = count +1
 				databin.Save(name, _G.db[name])
 			elseif not table.autosave then
-				log.Notice("Saving table "..name.." deactivated")
+				log.Info("Autosaving table "..name.." is deactivated and manual")
 			else
-				log.Info("Saving table "..name.." not enabled with this server")
+				log.Debug("Saving table "..name.." not enabled with this server")
 			end
 		end
 	end

@@ -103,7 +103,7 @@ function serialise(text,formatter)
 		return util.Serialise(text)
 	else
 		formatter = formatter or format.flat
-		return util.PrettyCode(text,3,nil,formatter)
+		return util.SerialiseWith(text,formatter,3)
 	end
 end
 

@@ -15,8 +15,9 @@ local os_date = os.date
 local print = print
 
 function log.PrintLog (msg)
-	if msg ==nil then return end
-	if type(msg) =="table" then msg = util.PrettyCode(msg,2) else msg = tostring(msg) end
+	if msg ==nil then return
+	elseif type(msg) =="table" then msg = util.SerialiseWith(msg)
+	else msg = tostring(msg) end
 	print (table_concat{os_date("!%H:%M:%S "), identifier, ifthen(request.identifier,"/",""), request.identifier or "", " [⸱] ", msg})
 end
 local Append = log.PrintLog
@@ -25,7 +26,7 @@ log.Append = Append
 -- optionally we can ask to use a file, which may be shared to aggregate logging from multiple processes (tee provides pseudo arbitration for concurrent buffered writes)
 function log.WriteLog (msg,prepend)
 	if msg ==nil then return end
-	if type(msg) =="table" then msg = util.Serialise(msg,2) else msg = tostring(msg) end
+	if type(msg) =="table" then msg = util.SerialiseWith(msg) else msg = tostring(msg) end
 	logger:write (table_concat{os_date("!%Y%m%d %H:%M:%S "), identifier, ifthen(request.identifier,"/",""), request.identifier or "", prepend or " [·] ", msg, "\n"})
 	logger:flush()
 end
@@ -36,8 +37,8 @@ function log.Open(file)
 	log.Append = log.WriteLog; Append = log.WriteLog
 end
 
-function log.Debug (msg)  if level > 3 then Append(msg," [ ] "); return nil,msg end end
-function log.Info (msg)   if level > 2 then Append(msg," [i] "); return nil,msg end end
+function log.Debug (msg)  if level > 3 then Append(msg," [ ] ") end end
+function log.Info (msg)   if level > 2 then Append(msg," [i] ") end end
 function log.Notice (msg) if level > 1 then Append(msg," [★] "); return nil,msg end end
 function log.Alert (msg)  if level > 0 then Append(msg," [‼︎] "); return nil,msg end end
 function log.Priority (msg)

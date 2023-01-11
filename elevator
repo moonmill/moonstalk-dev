@@ -59,10 +59,12 @@ local help = [[
 
 *NOTICE*
 	The Moonstalk project comprises many components, see website for details.
-	Core components are copyright 2010–2019, Jacob Jay.
+	Core components are copyright 2010–2022, Jacob Jay.
 	Free software, under the Artistic Licence 2.0.
 	http://moonstalk.org
 ]]
+
+-- NOTE: on non-production instances, server/elevator.lua files that are to execute commands as the current user must use util.Shell(elevator.deprivelege()), as on these machines the elevator is typically run with sudo -- TODO: ensure all directory, file and log creation routines also maintain compatible priveleges
 -- TODO: migrate to a coroutine based system that updates all server statuses simultaneously (ones in sequence can display "pending…" in grey); additionally the now deferred integrity checks (e.g. full scribe env) should occur after this with a "Checking scribe inegrity"
 
 -- # namespaces
@@ -448,6 +450,14 @@ end
 
 -- # other core commands
 
+function elevator.deprivelege(command)
+	if not elevator.config.sudouser then
+		return command
+	else
+		return "su -m "..elevator.config.sudouser.." -c '"..command.."'"
+	end
+end
+
 elevator.functions.newsecret = function()
 	if node.secret then
 		-- TODO: prompt for confirmation
@@ -476,7 +486,7 @@ end
 elevator.functions.incoming = function ()
 --TDOD: this is not currently used
 	local repositories = node.repositories or {}
-	if not util.ArrayContainsValue(node.repositories,".") then table.insert(repositories,1,".") end -- ensure we update the moonstalk root, this will use the repo originally that was cloned from (stored in .hg/hgrc)
+	if not util.ArrayContains(node.repositories,".") then table.insert(repositories,1,".") end -- ensure we update the moonstalk root, this will use the repo originally that was cloned from (stored in .hg/hgrc)
 	local changes
 	for _,repository in pairs(repositories) do
 		local count = util.Shell("hg incoming --cwd "..repository..'|egrep ^change|wc -l',"*a")
@@ -490,7 +500,7 @@ end
 
 elevator.functions.update = function ()
 	local repositories = node.repositories or {}
-	if not util.ArrayContainsValue(node.repositories,".") then table.insert(repositories,1,".") end -- ensure we update the moonstalk root, this will use the repo originally that was cloned from (stored in .hg/hgrc)
+	if not util.ArrayContains(node.repositories,".") then table.insert(repositories,1,".") end -- ensure we update the moonstalk root, this will use the repo originally that was cloned from (stored in .hg/hgrc)
 	local changes
 	for _,repository in pairs(repositories) do
 		print("Checking repositor"..en_plural(#repositories,"y","ies").."  : ".. (string.match(repository,"/(.*)") or "moonstalk"))
@@ -532,7 +542,7 @@ elevator.functions.appcheck = function ()
 	local updated_appcheck = {}
 	local apps_added = {}
 	for name in pairs(moonstalk.applications) do
-		if not util.ArrayContainsValue(node.appcheck,name) then
+		if not util.ArrayContains(node.appcheck,name) then
 			table.insert(apps_added,name)
 		end
 		table.insert(updated_appcheck,name)
@@ -676,7 +686,9 @@ end
 elevator.config.user = os.getenv 'USER'
 elevator.config.sudouser = os.getenv 'SUDO_USER'
 -- are we running as root? required for some commands
-if elevator.config.sudouser or elevator.config.user=='root' or not elevator.config.user then elevator.config.rootuser=true end
+if elevator.config.sudouser or elevator.config.user=='root' or not elevator.config.user then
+	elevator.config.rootuser=true
+end
 -- who's the user to chroot to, if not root
 elevator.config.user = node.user or elevator.config.sudouser if elevator.config.user=='root' then elevator.config.user=nil end
 

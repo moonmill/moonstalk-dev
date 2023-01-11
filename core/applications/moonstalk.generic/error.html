@@ -1,7 +1,7 @@
 <?
 -- NOTE: if the error view or controller contain errors themselves they will not be displayed and an empty response will result
 page.title="Server Error"
-local is_dev = not node.production -- TODO: or request.client.ip == host
+local is_dev = node.environment ~="production" -- TODO: or request.client.ip == host
 
 local function ul(val)
 	if string.sub(val,1,4) == "http" then

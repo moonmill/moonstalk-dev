@@ -166,7 +166,7 @@ if not node.smtp.postie then print"node.smtp.postie is disabled" return end
 
 -- FIXME: call Loaders/Starters ?
 
-if not handlers[1] then handlers[1] = function(data) log.Notice(util.PrettyCode(message)) end end -- TODO: or debug
+if not handlers[1] then handlers[1] = function(data) log.Notice(util.SerialiseWith(message)) end end -- TODO: or debug
 if node.postie.size ~=false then email.SIZE = "250 SIZE "..(tostring(node.postie.size) or "36000").."\r\n" end
 email.HOST = "220 "..(node.postie.host or node.hostname).." Moonstalk.Postie\r\n"
 if node.postie.clients then email.clients=keyed(node.postie.clients) end

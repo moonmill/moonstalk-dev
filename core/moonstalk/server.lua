@@ -74,8 +74,8 @@ require "moonstalk/logger" -- must be after utilities as we need that to load wi
 dofile "core/globals/Attributes.lua"
 
 _G.EMPTY_TABLE = {} -- TODO: if node.debug set a metatable that throws an error when modified
-if not node.production and node.logging >=3 then
-	setmetatable(_G.EMPTY_TABLE,{__newindex=function(_,key) moonstalk.Error{title="Attempt to assign key on reserved reused EMPTY_TABLE: "..key, level="Alert"} end})
+if node.environment ~="production" and node.logging >=3 then
+	setmetatable(_G.EMPTY_TABLE,{__newindex=function(_,key) moonstalk.Error{title="Attempt to assign key on reserved reused EMPTY_TABLE: "..key, level="Notice"} end})
 end
 
 keyed(moonstalk.reserved)
@@ -195,10 +195,11 @@ do
 		local imported,err
 		-- must explicitly load settings if present before processing
 		if bundle.files["settings.lua"] then
+			bundle.enum = _G.enum
 			imported,err = util.ImportLuaFile(bundle.path.."/settings.lua", bundle)
 			bundle.enum = nil
 			if err then
-				moonstalk.Error{bundle,title="Error loading settings for "..bundle.id,detail=err}
+				moonstalk.Error{bundle,title="Error loading settings for "..bundle.id,detail=err, level="Notice"}
 			else
 				for langid,language in pairs(bundle.vocabulary or {}) do
 					language._id = langid
@@ -206,9 +207,9 @@ do
 				end
 			end
 		end
-		if not node.production and bundle.development then
+		if node.environment ~="production" and bundle.development then
 			log.Info("using development settings")
-			copy(bundle.development,bundle)
+			copy(bundle.development,bundle,true)
 		end
 
 		if not err then return true end
@@ -222,7 +223,7 @@ do
 			local err
 			bundle.schema,err = import(bundle.path.."/schema.lua",{enum=_G.enum}) -- enum is a pointer to reallocate to the global table, which we then remove as is not a schema table
 			bundle.schema.enum = nil
-			if err then moonstalk.Error{bundle,title="Error in schema", detail=err, class="lua"} return end
+			if err then moonstalk.Error{bundle,title="Error in schema", detail=err, class="lua", level="Notice"} return end
 		elseif not bundle.schema then return
 		else log.Debug("  schema")
 		end
@@ -242,7 +243,7 @@ do
 				if moonstalk.databases[name] ~=conf then append(conf, moonstalk.databases[name]) end
 				if conf.table ~=false then -- e.g. for models without persistence
 					if moonstalk.databases[name] and conf.owner ~= bundle.id then
-						moonstalk.Error{bundle,title=bundle.id.." cannot claim database '"..conf.name.."', already claimed by "..conf.owner}
+						moonstalk.Error{bundle,title=bundle.id.." cannot claim database '"..conf.name.."', already claimed by "..conf.owner, level="Notice"}
 					else
 						moonstalk.databases[name] = conf
 						table.insert(moonstalk.databases, conf)
@@ -272,10 +273,12 @@ function moonstalk.EnableBundle(bundle)
 	local result,err
 	if bundle.files["functions.lua"] then
 		-- TODO: setfenv on all functions in the bundle so they share a single namespace and can reference each other using keys not full paths, currently each ImportLuaFile call assigns a seperate environment; this could however only be done once all imports and function assignments are complete as due to nesting of calls (import(functions > import(client))) the deeper calls have no access to the original bundle environment
+		bundle.enum = _G.enum
 		local result,err = pcall(util.ImportLuaFile, bundle.path.."/functions.lua", bundle)
+		bundle.enum = nil
 		if not result then
 			bundle.ready = false
-			return moonstalk.Error{bundle, title="Error loading functions",detail=err,class="lua"}
+			return moonstalk.Error{bundle, title="Error loading functions",detail=err,class="lua", level="Notice"}
 		end
 	end
 
@@ -283,7 +286,7 @@ function moonstalk.EnableBundle(bundle)
 		log.Debug(bundle.id..".Loader()")
 		result,err = pcall(bundle.Loader)
 		if not result then
-			moonstalk.Error{bundle, title="Loader failed", detail=err, class="lua"}
+			moonstalk.Error{bundle, title="Loader failed", detail=err, class="lua", level="Notice"}
 			bundle.ready = false
 			bundle.Loader = nil
 		return end
@@ -293,7 +296,8 @@ end
 function moonstalk.Error(bundle,error)
 	-- (string) or (bundle,string) or or {bundle,level="Alert",title=string,origin=bundle.id,global=false…} where all are optional except title
 	-- TODO: err.name to prevent duplicates, typically a simple name, else title is used; if matched then simply the count and last occurance is updated, with the timestamp added to an array; if the error is not identical it is not linked
-	-- bundle can be any table havign an errors table, such as a site, but in this case case err.realm="site" to prevent propogation to the global moonstalk errors -- REFACTOR: use global=false instead of realm="site"
+	-- ready=true to not change bundle ready state
+	-- bundle can be any table havign an errors table, such as a site, but in this case err.realm="site" to prevent propogation to the global moonstalk errors -- REFACTOR: use global=false instead of realm="site"
 	if not error then error = bundle; bundle = nil end
 	if type(error) =='string' then error = {title=error} end
 	if error[1] then bundle = error[1]; error[1] = nil end
@@ -301,12 +305,14 @@ function moonstalk.Error(bundle,error)
 	error.origin = error.origin or bundle.id
 	error.when = now
 	error.level = log.levels[error.level] or log.levels.Info
+	if not error.ready and error.level >log.levels.Info then bundle.ready = false end
 	if error.class =="lua" and error.detail then
 		error.detail = string.gsub(error.detail,".-%[%w- \"(.*)","%1",1) or error.detail
 		error.detail = string.gsub(error.detail,"\"]:(%d)",":%1",1)
 	end
-	if error.level <= log.levels.Notice then
+	if error.level >= log.levels.Notice then
 		if bundle ~=moonstalk and (not error.id or not bundle.errors[error.id]) then
+			bundle.errors.significance = bundle.errors.significance or 10 -- should be inherited from default application but isn't
 			if error.level < bundle.errors.significance then bundle.errors.significance = error.level end
 			table.insert(bundle.errors,error)
 			if error.id then bundle.errors[error.id] = error end
@@ -340,7 +346,7 @@ function moonstalk.LoadApplications(folder)
 		end
 		if moonstalk.applications[application.id] then
 			application.ready = false
-			moonstalk.BundleError(moonstalk, {realm="bundle",title="Cannot load duplicate application name: "..application.id})
+			moonstalk.Error(moonstalk, {realm="bundle",title="Cannot load duplicate application name: "..application.id, level="Notice"})
 		else
 			moonstalk.applications[application.id] = application
 			copy(moonstalk.defaults.applications, application)
@@ -403,17 +409,20 @@ function moonstalk.EnableApplications(disable)
 				log.Debug(name..".Enabler()")
 				local result,error = pcall(application.Enabler)
 				if not result then
-					moonstalk.Error{application, title="Enabler failed", detail=error, class=ifthen(moonstalk.server~="tarantool","lua")}
+					moonstalk.Error{application, title="Enabler failed", detail=error, class=ifthen(moonstalk.server~="tarantool","lua"), level="Notice"}
 					application.ready = false
 				end
-				application.Enabler = nil
 			end
 		else
 			log.Info("Application disabled: "..name)
 		end
 	end
+
 	moonstalk.Environment({language=node.language,locale=node.locale},{language="en",locale="eu"}) -- establish initial defaults; applicable to any server which does not set per-request, e.g. the elevator
-	--if moonstalk.server ~="database" or node.database.sites == true then -- FIXME: there's not way to flag a server type, or to access node[database-server].sites==true; but this latter could simply be automatically hoisted to moonstalk.server_config or {}
+
+	local sites_enabled = {scribe=true,elevator=true}
+	copy(node.sites,sites_enabled)
+	if sites_enabled[moonstalk.server] then
 		log.Info"Gathering sites"
 		for name,application in pairs(moonstalk.applications) do
 			if not disable[name] then
@@ -422,7 +431,7 @@ function moonstalk.EnableApplications(disable)
 					log.Debug(name..".Sites()")
 					local result,sites = pcall(application.Sites)
 					if not result then
-						moonstalk.Error{application, title="Sites failed", detail=sites, class="lua"}
+						moonstalk.Error{application, title="Sites failed", detail=sites, class="lua", level="Notice"}
 					else
 						for _,site in ipairs(sites) do
 							scribe.Site(site)
@@ -431,7 +440,10 @@ function moonstalk.EnableApplications(disable)
 				end
 			end
 		end
-	--end
+	else
+		log.Debug("sites are not enabled for this server (requires node.sites."..moonstalk.server.."=true|setting)")
+	end
+
 	log.Info"Running starters"
 	local finalisers = {}
 	for name,application in pairs(moonstalk.applications) do
@@ -441,18 +453,16 @@ function moonstalk.EnableApplications(disable)
 				-- the test file can define and change any bundle resource, such as addresses, views, controllers and enabler functions, through the application upvalue
 				log.Debug(name.."/tests.lua")
 				local imported,err = util.ImportLuaFile(application.path.."/test.lua",bundle)
-				if err then moonstalk.BundleError(application,{realm="bundle",title="Error loading tests",detail=err,class="lua"}) end
+				if err then moonstalk.Error(application,{realm="bundle",title="Error loading tests",detail=err,class="lua", level="Notice"}) end
 				application.files["test.lua"] = nil
 			end
-			if not application.errors[1] and application.ready ==nil then
-				application.ready = true
-			end
+			if application.ready ==nil then application.ready = true end
 			if application.Starter then
 				-- can optionally return a table defining a handler to run as a finaliser using an arbitrary priority
 				log.Debug(name..".Starter()")
 				local result,response = xpcall(application.Starter, debug.traceback)
 				if not result then
-					moonstalk.Error{application, title=name..".Starter failed", detail=response}
+					moonstalk.Error{application, title=name..".Starter failed", detail=response, level="Notice"}
 					application.ready = false
 				elseif response then -- optional finaliser
 					if type(response) =='function' then response = {handler=response} end
@@ -465,13 +475,13 @@ function moonstalk.EnableApplications(disable)
 		end
 	end
 
-	if moonstalk.errors[1] then -- TODO: should only consider Notice or greater levels, or where error.exit ~=false -- TODO: aggregrate errors, i.e. don't push to a notifcation service until this point when only the first 2 need be included and a link to manager/status?token
+	if moonstalk.ready ==false then
 		if moonstalk.initialise.exit ~=false then
 			log.Priority"Failed to initialise; exiting"
 			os.exit()
 		end
 	else
-		moonstalk.ready = true --  TODO: if moonstalk.ready ~= false then -- and catch errors
+		moonstalk.ready = true
 	end
 	if moonstalk.initialise.ready ==false then
 		-- finalisers must be run manually
@@ -484,7 +494,7 @@ function moonstalk.EnableApplications(disable)
 			local result,error = xpcall(finaliser.handler, debug.traceback)
 			if not result then
 				local bundle = finaliser.bundle or moonstalk
-				moonstalk.BundleError(bundle, {realm="application", title=finaliser.id.." ->finaliser failed", detail=error, class="lua"})
+				moonstalk.Error(bundle, {realm="application", title=finaliser.id.." ->finaliser failed", detail=error, class="lua", level="Notice"})
 				bundle.ready = false
 			end
 		end
@@ -565,7 +575,7 @@ function moonstalk.Initialise(options)
 	moonstalk.initialise = options
 	moonstalk.server = options.server
 	local bundle,err = util.ImportLuaFile("moonstalk/utilities-dependent", util) -- modules now available so we'll add the dependent functions to util
-	if err then moonstalk.BundleError(moonstalk, {realm="moonstalk",title="Failed to import 'utilities-dependent.lua'"; detail=err, class="lua"}) end
+	if err then moonstalk.Error(moonstalk, {realm="moonstalk",title="Failed to import 'utilities-dependent.lua'"; detail=err, class="lua", level="Notice"}) end
 
 	moonstalk.resolvers = {}
 	local resolvers = io.open("/etc/resolv.conf")
@@ -580,7 +590,7 @@ function moonstalk.Initialise(options)
 		if moonstalk.server =="elevator" then
 			display.error("No resolvers available, using 1.1.1.1",false)
 		else
-			moonstalk.BundleError(moonstalk, {realm="moonstalk",title="No resolvers available"})
+			moonstalk.Error(moonstalk, {realm="moonstalk",title="No resolvers available", level="Info"})
 		end
 	end
 	options.disable = keyed(options.disable) or {}
@@ -590,14 +600,19 @@ function moonstalk.Initialise(options)
 	log.Open(options.log or "temporary/moonstalk.log")
 	log.Notice("Initialising Moonstalk for "..options.server.." on "..node.hostname)
 
-	if node.logging > 3 then
-		-- dev mode
+	if node.logging > 3 and DISABLED then -- FIXME: see functions below
 		moonstalk.translate = moonstalk.Debug_translate
 		moonstalk.Translate = moonstalk.Debug_Translate
 	else
 		moonstalk.Debug_translate = nil
 		moonstalk.Debug_Translate = nil
 	end
+	-- define a proxy for the vocabularies
+	-- these are also defined as upvalues within LoadView
+	_G.l = {} -- provides metable function for localised voacbularies; see translate()
+	_G.L = {} -- Intial cap version of l
+	setmetatable(_G.l,{__index=moonstalk.translate, __call=moonstalk.plural})
+	setmetatable(_G.L,{__index=moonstalk.Translate, __call=moonstalk.Plural})
 
 	math.randomseed(os.time()*10000)
 	posix_stdlib.setenv("TZ","UTC")
@@ -850,7 +865,7 @@ function moonstalk.Initialise(options)
 		log.Debug"Moonstalk is running in a synchronous server environment"
 	else
 		globals_count = #moonstalk.globals
-		log.Debug("Resume is maintaining "..globals_count.." supplementary moonstalk.globals: "..table.concat(moonstalk.globals,", "))
+		if globals_count >0 then log.Debug("Resume is maintaining "..globals_count.." supplementary moonstalk.globals: "..table.concat(moonstalk.globals,", ")) end
 		keyed(moonstalk.globals)
 	end
 	setmetatable(_G.enum,nil)
@@ -916,7 +931,6 @@ end
 
 
 -- # Localisation
--- production mode attempts to use vocabulary for user's language(s), else the site or node default; dev mode uses only the user's defined languages, else displays a 'flagged' placeholder with the term's name
 -- TODO: in dev mode show (e.g. with title attibute) where terms are defined; create an index of files and the terms defined in them in the order they are replaced (if multiple)
 -- OPTIMIZE: pre-render views for each declared language (for an address? or perhaps by inheriting to the view with a <? languages = declaration, requring a metatable on its enviornment during initialisation ?> ) replacing calls to l.* with the term, this avoiding the overhead of a metatable call, function invocation and table lookup for each term
 do
@@ -924,8 +938,19 @@ local vocab1,vocab2,vocab3 --,vocab4,vocab5
 local util_Capitalise = util.Capitalise
 function moonstalk.translate(_,term) return vocab1[term] or vocab2[term] or vocab3[term] end -- OPTIMISE: in the scribe this should use local voacab and inline instead of metatable func call
 function moonstalk.Translate(_,term) return util_Capitalise( vocab1[term] or vocab2[term] or vocab3[term] or term ) end
-function moonstalk.Debug_translate(_,term) return vocab1[term] or vocab2[term] or vocab3[term] or "⚑"..(term or "UNDEFINED") end -- TODO: this behaviour is significantly different from production as that will throw errors for nil values or fail to concatenate output, thus may be better to remove and instead compile all use of l.* l[*] etc and compare against available keys, to provide a report
-function moonstalk.Debug_Translate(_,term) return util_Capitalise(_G.vocab1[term] or vocab2[term] or vocab3[term] or "⚑"..(term or "UNDEFINED")) end
+function moonstalk.Debug_translate(_,term) -- FIXME: abbr insertion doesn't have reference to output? is disabled in Initialise()
+	-- TODO: this is actually a scribe functionality as it uses HTML thus needs moving its enabler but would loose the upvalues, so probably just best to wrap in an if moonstalk.server =="scribe"
+	-- TODO: this behaviour is significantly different from production as that will throw errors for nil values or fail to concatenate output, thus may be better to remove and instead compile all use of l.* l[*] etc and compare against available keys, to provide a report
+	local translated = vocab1[term] or vocab2[term] or vocab3[term] or "⚑"..(term or "UNDEFINED")
+	local open,close = string.match(_G.output[_G.output.length] or "","(<*).-(>*)[^>]*$") -- where translations are inserted directly into a tag, we'll find an open but not a close, however if other values are inserted prior to the translation then this will fail, thus we should check the preceeding one as well for an unclosed tag
+	if type(translated) ~='string' or (open and not close) then return translated end
+	return [[<abbr class='debug' title=']]..term..[['>]].. translated ..[[</abbr>]]
+end
+function moonstalk.Debug_Translate(_,term)
+	local translated = util_Capitalise(vocab1[term] or vocab2[term] or vocab3[term] or "⚑"..(term or "UNDEFINED"))
+	if type(translated) ~='string' then return translated end
+	return [[<abbr class='debug' title=']]..term..[['>]].. translated ..[[</abbr>]]
+end
 
 local languages = languages
 function moonstalk.plural(_,term,number)
@@ -946,13 +971,6 @@ local util_Capitalise = util.Capitalise
 function moonstalk.Plural(_,term,number) return util.Capitalise(moonstalk_plural(_,term,number)) end
 end
 
--- define a proxy for the vocabularies
--- these are also defined as upvalues within LoadView
-_G.l = {} -- provides metable function for localised voacbularies; see translate()
-_G.L = {} -- Intial cap version of l
-setmetatable(_G.l,{__index=moonstalk.translate, __call=moonstalk.plural})
-setmetatable(_G.L,{__index=moonstalk.Translate, __call=moonstalk.Plural})
-
 local unpopulated = EMPTY_TABLE
 local vocabulary = _G.vocabulary
 function moonstalk.Environment(client, tenant, content)
@@ -964,14 +982,15 @@ function moonstalk.Environment(client, tenant, content)
 	-- all values are expected to be valid, i.e. must exist as defined languages
 	-- the scribe ensures client always has language, either from user or browser detected and matching the site, but defaulting to site/tenant language, however other environments may not so here we default to the tenant values regardless
 	-- not strictly necessary if node is only serving static pages, as all sites share the same language, and clients cannot set preferences, however fairly low cost thus standard in servers handling user configurable requests and as localised functions may nonetheless be called for formatting
-	_G.locale = locales[client.locale] or locales[tenant.locale]
-	local language
+	local language,locale
+	if content then locale = content.locale end
+	_G.locale = locale or locales[client.locale] or locales[tenant.locale]
 	if (not content or not content.vocabulary) and not tenant.vocabulary then
 		language = client.language or tenant.language
 		vocab1 = vocabulary[language]
 		vocab2 = unpopulated
 		vocab3 = unpopulated
-	elseif not content or not content.vocabulary then 
+	elseif not content or not content.vocabulary then
 		language = client.language or tenant.language
 		vocab1 = tenant.vocabulary[language]
 		vocab2 = vocabulary[language]
@@ -1011,13 +1030,14 @@ end
 function moonstalk.ImportVocabulary(bundle) -- TODO: invoke on file change; remove hack from loadview
 	-- unlike settings, vocabularies have no access to the global environment
 	if not bundle.files["vocabulary.lua"] then return end
+	bundle.polyglot = true
 	bundle.vocabulary = bundle.vocabulary or {}
 	log.Debug("  vocabulary")
 	bundle.files["vocabulary.lua"].imported = now
 	bundle.vocabulary.vocabulary = bundle.vocabulary -- this is available so that long-form keys can be declared with the full-form syntax of vocabulary['en-gb'].key_name
 	setmetatable(bundle.vocabulary, {__index=function(table, key) local value = rawget(table,key) if not value then value = {} rawset(table,key,value) end return value end}) -- adds language subtables ondemand -- TODO: if not value and languages[key]
 	local imported,err = util.ImportLuaFile(bundle.path.."/vocabulary.lua",bundle.vocabulary,function(code)return string.gsub(code,"\n%[","\nvocabulary[")end) -- translates ['en-gb'].key_name long-form declarations to _vocabulary['en-gb'].key_name
-	if err then moonstalk.BundleError(site,{realm="bundle",title="Error loading vocabulary",detail=err}) end
+	if err then moonstalk.Error(site,{realm="bundle",title="Error loading vocabulary",detail=err}) end
 	setmetatable(bundle.vocabulary, nil)
 	bundle.vocabulary.vocabulary = nil
 	-- TODO: copy(language,vocabulary[langid],true,false)

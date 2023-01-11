@@ -332,7 +332,7 @@ do
 		else
 			datetime.dd = datetime.d
 		end
-		datetime.ddd = table.concat{datetime.d,"<sup>",l.Ordinal(datetime.d),"</sup>"}
+		datetime.ddd = table.concat{datetime.d,"<sup>",l.OrdinalDayHTML(datetime.d),"</sup>"}
 		datetime.m = datetime.month
 		if datetime.m < 10 then
 			datetime.mm = "0"..datetime.m
@@ -784,13 +784,20 @@ function Random(array)
 end
 _G.random = Random
 
-function Wrap(...)
+function Wrap(a,b,c)
 	-- conditional concatenator of up to three arguments, values of which may or may not be present, but will only be returned concatenated if the first and second are; typically used in the form: wrap("prepend",conditional_value,"append") such as to insert an html tag with it's content if present: wrap("<p>",content_value,"</p>")
-	local arg = {...}
-	if not arg[1] or arg[1]=="" or not arg[2] or arg[2]=="" then return "" end
-	return table.concat{(arg[1] or ""), (arg[2] or ""), (arg[3] or "")}
+	if not a or a=="" or not b or b=="" then return "" end
+	return table.concat{a or "", b or "", c or ""}
 end
 _G.wrap = Wrap
+function WrapIf(a,b,c,d)
+	-- as per wrap but only if the 4th argument (d) is truthy, esle returns only the second argument (b)
+	if not d then return b or ""
+	elseif not a or a=="" or not b or b=="" then return "" end
+	return table.concat{a or "", b or "", c or ""}
+end
+_G.wrapif = WrapIf
+
 
 function Keyed(a,b,c)
 	-- keyed {table} or keyed("key", "value", {table}) or keyed "alphabet-string" or keyed{key-value}
@@ -802,7 +809,7 @@ function Keyed(a,b,c)
 	-- for an array of subtables the keys are dervived from either the specified key name or the "value" key, and the value will be either the specified key name or will poit to the subtable itself; thus {{id="one",value="One"},{id="two",value="Two"}} would become {{id="one",value="One"},{id="two",value="Two"},one=One,two=Two} or without a value key specified {{id="one",value="One"},{id="two",value="Two"},one={id="one",value="One"},two={id="two",value="Two"}}
 	-- if only an array of tables is provided with no key and value parameters, the new table is index by either a value subkey, or the index position]
 	if not a then return
-	elseif type(a) =='string' and not b then -- special case, conversion of charstring into table with each char keyed
+	elseif not b and type(a) =='string' then -- special case, conversion of charstring into table with each char keyed
 		local keyed = {}
 		local char
 		for position=1,#a do
@@ -811,14 +818,14 @@ function Keyed(a,b,c)
 			keyed[char] = true
 		end
 		return keyed
-	elseif not b and type(a[1]) =='string' then -- keyed{"enum1","enum2"} simple enumeration, maps the array value to its position {enum1=1,enum2=2}
+	elseif not b and a[1] and type(a[1]) ~='table' then -- keyed{"enum1","enum2"} simple enumeration, maps the array value to its position {enum1=1,enum2=2}
 		for i,value in ipairs(a) do a[value] = i end
 		return a
 	end
 	local keyed = a; if c then keyed = c elseif b then keyed = b end
 	if not b and not keyed[1] then -- keyed{key=value,…} inverts to add value=key
 		for k,v in pairs(keyed) do keyed[v]=k end
-	elseif not b and keyed[1] and keyed[1].value then -- keyed{{value=key},…} keys subtables by their value
+	elseif not b and type(keyed[1])=='table' and keyed[1].value then -- keyed{{value=key},…} keys subtables by their value
 		for _,item in ipairs(keyed) do keyed[item.value] = item end
 	elseif b then -- keyed("key",{{key=value},…}) keys subtables by the given key (instead of value above)
 		for _,item in ipairs(keyed) do keyed[item[a]] = item end
@@ -829,29 +836,35 @@ function Keyed(a,b,c)
 end
 _G.keyed = Keyed
 
-function Options(array)
-	-- creates an enumerated table from an an array of table members which may be specified in any order; each member is indexed in the enumerated table by its "value" (enumerated position number) having the value of its name or label, it is also indexed by its name or label with its value with the value; additionally the full tables are available with the same indexes from an 'options' subtable, and an 'ordered' subtable preserves the original order
+function Options(table)
+	-- converts an array of table members to an enumerated table, the array may be specified in any order; each member is indexed in the enumerated table by its "value" (enumerated position number) having the value of its name or label, it is also indexed by its name or label with its value with the value; additionally the full tables are available with the same indexes from an 'options' subtable, and an 'ordered' subtable preserves the original order for ipairs iterations
+	-- options named 'ordered' or 'options' are not valid because they represent internal tables
 	-- the value/label syntax is compatible with the kit application tag.select function
 	-- member = {value=n, name="string", label="string", wibble=wobble}
-	-- array[member.value] = member.name
-	-- array.options[member.name or member.value] = member
-	local enum = {options = {}, ordered=array}
-	for position,member in ipairs(array) do
-		if member.value then enum[member.value] = member.name or member.label end
-		enum[member.name or member.label] = member.value or member
-		if member.value then enum.options[member.value] = member end
-		enum.options[member.name or member.label] = member
-		enum.options[member.value or position] = member
+	-- table[member.value] = member.name
+	-- table.options[member.name or member.value] = member
+	table.ordered = table.ordered or {} -- preserve if re-indexing
+	local count = #table
+	for i=1,count do
+		table.ordered[i] = table[i]
+		table[i] = nil
 	end
-	return enum
+	table.options = table.options or {}
+	for i,member in ipairs(table.ordered) do
+		table[member.value or i] = member.name or member.label
+		table[member.name or member.label] = member.value or i
+		table.options[member.value or i] = member
+		table.options[member.name or member.label] = member
+	end
+	return table
 end
 _G.options =Options
 
 function _G.ifthen(test, true_value, false_value)
 	-- convenience handler giving the functionality of a ternary operator, for return or output of values based upon conditions(s) e.g. "checked" for a radio button ?(ifthen(request.form.radio==1,"checked"))
 	-- NOTE: this routine is more expensive than a simple if statement, however it is more compact for in-line use; both the true and false values are evaluated irrespective of the condition, thus cannot themselves be conditional
-	-- NOTE: in scribe views, this function is automatically expanded as an in-line if statement thus has no penality there, and only the value matching the condition is evalulated
-	if test then return true_value or "" else return false_value or "" end
+	-- NOTE: in scribe views, this function is automatically expanded as an in-line if statement thus has no penality there, and only the value matching the condition is evalulated -- TODO:
+	if test then return true_value else return false_value end
 end
 
 function Varkey (value)
@@ -869,25 +882,23 @@ end
 _G.varkey = Varkey
 
 function Copy(outof,a,b,c)
-	-- defaults to deepcopy, can return a copy of a given table, or copy the contents of one to another (fully recursive), replacing existing values by default; if recurse is false performs a simple (more efficient) assignment of root values from one table to the other, but the tables will be the same pointers in both tables (i.e. changes to a subtable will affect both)
-	-- if replace is false or nil, value will only be copied if not existing (false will be preserved); recurse is true and replace is nil (the defaults) subtable keys will be copied across
+	-- copies the contents of one table to another (fully recursive), but by default does not replace values
+	-- copy(table,recurse) returns a deep copy by default preserving the metatable
+	-- copy(from,to,replace,recurse) performs a deep copy without replacing(!)
+	-- deep copyies ensure all tables are unique, a shallow copy means table are shared having the same pointers; if recurse is false performs a simple (more efficient) assignment of root values from one table to the other; if replace is false or nil, value will only be copied if not existing; if recurse is true and replace is nil (the defaults) subtable keys will be copied across; false value are preserved
 	-- performs best if outof has fewer keys than into
 	-- use append() to copy only array values
 	-- WARNING: not safe with arrays except in the root with replace=true -- TODO: add array detection and replace?
 	local into,replace,recurse
 	if b ==nil and (a == nil or a == true or a == false) then
-		-- copy(table,recurse)
-		-- returns duplicate of table (and its metatable), defaulting to a deepcopy
-		recurse = a if recurse ==nil then recurse=true end
+		if a ==false then recurse=false else recurse=true end
 		into = {}
 		local mt = getmetatable(outof)
 		if mt then setmetatable(into,mt) end
 	else
-		-- copy(from,to,replace,recurse)
-		-- copies the contents from one table to another, also returning it; defaults to a shallow copy with replacing
 		into = a or {}
-		replace = b
-		recurse = c if recurse==nil then recurse=true end
+		replace = b -- default: don't replace
+		recurse = c if recurse==nil then recurse=true end -- default: recurse
 	end
 	if not into or not outof then
 		return
@@ -1265,7 +1276,7 @@ function RoundDecimals(num,up) -- OPTIMISE: probably some way of doing this math
 end
 
 function Round(num, places)
-	-- rounds to the nearest (up and down)
+	-- rounds to the nearest preceeding whole for the given number of decimals, default is none (i.e. returns a whole integer); -- NOTE: rounds up on .5 beyond the decimal places
 	places = math.pow(10, places or 0)
 	if num >= 0 then
 		return math.floor(num*places + 0.5)/places
@@ -1396,8 +1407,8 @@ function AppendToDelimited(value,to,delimiter)
 	end
 end
 
-format.default={
-	key_indent = "\t",
+format.default={ -- readable multiline; use compact otherwise
+	key_indent = "   ",
 	key_open = "['",
 	key_close = "']",
 	key_match = "[\\']",
@@ -1438,6 +1449,7 @@ format.html_simple = {
 }
 format.html = copy(format.html_simple); format.html.newline = "<br>"; format.html.table_open="{<blockquote>"; format.html.table_close="</blockquote>}"
 format.root = copy(format.default); format.root.comma=""; format.root.table_open=""; format.root.table_close=""
+format.compact = copy(format.default); format.compact.indent=""; format.compact.linebreak=""; format.compact.newline=""
 
 do local type=type
 do local _format = format.default
@@ -1492,15 +1504,11 @@ function Serialise (object,maxdepth,lines,depth)
 end end
 
 local util_Decimals = util.Decimals
-function PrettyCode (object,maxdepth,depth,_format,exclude,truncate)
-	if type(maxdepth)~='number' then _format=maxdepth; maxdepth=nil end
-	return util.SerialiseWith(object,{maxdepth=maxdepth,depth=depth,format=_format,exclude=exclude,truncate=truncate})
-end
 local reserved = keyed{"and","break","do","else","elseif","end","false","for","function","if","in","local","nil","not","or","repeat","return","then","true","until","while"}
-function SerialiseWith (object,options,depth)
+function SerialiseWith (object,options, _depth)
 	-- slower than Serialise, but constructs readable multi-line indented output
 	-- second argument can specify either a named format or a table of format keys
-	-- depth is a private value
+	-- _depth is an internal recursion value and must not be specified, not to be fonfused with options.depth
 	-- TODO: add linewrap and indented value formatting
 	-- WARNING: for number behaviours see Serialise()
 	local _format
@@ -1510,22 +1518,22 @@ function SerialiseWith (object,options,depth)
 		-- handles the root table object as executable lua
 		_format = format.root
 		options.executable = nil -- musn't apply to sub tables
-		options.truncate=false
-		depth = -1
+		options.truncate = false
+		_depth = -1
 	else
 		_format = util.format[options.format] or options.format or format.default
 	end
 	local tonumber = tostring
 	if options.decimals then tonumber = util_Decimals end
 	_format.table_suffix = _format.newline
-	depth = depth or 0
+	_depth = _depth or 0
 	local maxdepth = options.maxdepth or 5
 	local roottable
 	local serialised = {}
 	if type(object) =='string' then
 		if options.truncate~=false and #object > 200 then object = "* "..tostring(#object).." chars * beginning: "..string_sub(object,1,100) end
 		if string_find(object,'[\"\n]') then
-			object = string_gsub(object,"\n",_format.linebreak..string.rep("\t",depth+1))
+			object = string_gsub(object,"\n",_format.linebreak..string.rep("\t",_depth+1))
 			table_insert(serialised,_format.longstring_open) table_insert(serialised,object)
 			table_insert(serialised,_format.longstring_close)
 		else
@@ -1536,13 +1544,13 @@ function SerialiseWith (object,options,depth)
 	elseif type(object) =='number' then
 			table_insert(serialised,string_format("%.16g",object))
 	elseif type(object) =='table' then
-		depth = depth +1
-		if depth > maxdepth then return _format.table_open.."... ".._format.table_close end
-		local table_close = _format.newline..string.rep(_format.key_indent,depth-1).._format.table_close
+		_depth = _depth +1
+		if _depth > maxdepth then return _format.table_open.."... ".._format.table_close end
+		local table_close = _format.newline..string.rep(_format.key_indent,_depth-1).._format.table_close
 		table_insert(serialised,_format.table_open)
 		local array={}
 		for key,value in ipairs(object) do
-			table_insert(serialised,util.SerialiseWith(value,options,depth))
+			table_insert(serialised,util.SerialiseWith(value,options,_depth))
 			table_insert(serialised,_format.comma)
 			array[key]=true
 		end
@@ -1550,14 +1558,14 @@ function SerialiseWith (object,options,depth)
 		for key,value in pairs(object) do
 			if exclude and exclude[key] then
 				table_insert(serialised,_format.newline)
-				table_insert(serialised,string.rep(_format.key_indent,depth))
+				table_insert(serialised,string.rep(_format.key_indent,_depth))
 				table_insert(serialised,key)
 				table_insert(serialised,"=")
 				table_insert(serialised,"EXCLUDED")
 				table_insert(serialised,_format.comma)
 			elseif not array[key] then
 				table_insert(serialised,_format.newline)
-				table_insert(serialised,string.rep(_format.key_indent,depth))
+				table_insert(serialised,string.rep(_format.key_indent,_depth))
 				if type(key) =='number' then
 					table_insert(serialised,_format.numberkey_open)
 					table_insert(serialised,string_format("%d",key))
@@ -1571,7 +1579,7 @@ function SerialiseWith (object,options,depth)
 					table_insert(serialised,_format.key_close)
 				end
 				table_insert(serialised,_format.equals)
-				table_insert(serialised,util.SerialiseWith(value,options,depth))
+				table_insert(serialised,util.SerialiseWith(value,options,_depth))
 				table_insert(serialised,_format.comma)
 			end
 		end
@@ -1851,7 +1859,7 @@ function FindKeyValueInTable(attribute,value,items,max)
 end
 
 function TableContainsAnyValue(table,values)
-	for _,value in ipairs(values) do
+	for _,value in pairs(values) do
 		if table[value] then return true end
 	end
 end
@@ -1877,48 +1885,60 @@ function TableContainsAnyKeyValue(this,those)
 	end
 end
 
-function ArrayContainsValue(array,value)
+function ArrayContains(array,value)
 	if not value or not array then return end
 	for position,arrayvalue in ipairs(array) do
 		if arrayvalue==value then
 			return position
 		end
 	end
-	return nil
 end
+ArrayContainsValue = ArrayContains -- DEPRECATED: remove asap
+
 function ArrayContainsKeyValue(array,key,value)
-	-- value maybe a table of possible key values
+	-- value may be a keyed table of possible key values {value=true} to match, i.e. if value is a table it is indexed for the arraytable value
 	if not value or not key or not array then return end
-	if type(value)~='table' then
-		for position,arrayvalue in ipairs(array) do
-			if arrayvalue[key]==value then return position end
+	if type(value) ~='table' then
+		for position,arraytable in ipairs(array) do
+			if arraytable[key] ==value then return position end
 		end
 	else
-		for position,arrayvalue in ipairs(array) do
-			if value[arrayvalue[key]] then return position end
+		for position,arraytable in ipairs(array) do
+			if value[arraytable[key]] then return position end
 		end
 	end
-	return nil
 end
 
-function ArrayContainsAnyValue(array,values,exact)
-	-- look in an array of values, for any value from another array; typically the values would be strings
-	-- by default this function performs string normalisation; specify the last exact param as true to match the extract string
-	-- use ArrayContainsValue to look for a single value
+function ArrayContainsAll(array,values)
+	-- look in an array of values, for alls values from another array (ideally the smaller)
+	-- returns true if all matched
 	if not values or not array then return end
-	for position,value in ipairs(values) do
-		-- same as keyed() but with normalisation
-		values[util.Transliterate(value,true)] = true
+	local matches = {}
+	local count = #values
+	for i,value in ipairs(values) do
+		matches[value] = true
 	end
-	for position,arrayvalue in ipairs(array) do
-		if values[arrayvalue] then
-			return position
+	local matched = 0
+	for i,value in ipairs(array) do
+		if matches[value] then
+			matched = matched +1
+			if matched ==count then return true end
 		end
 	end
-	return nil
 end
 
-function RemoveArrayValue(array,value)
+function ArrayContainsAny(array,values)
+	-- look in an array of values, for any value from another array
+	-- returns the matched value and its position in the array
+	if not values or not array then return end
+	local has = {}
+	for position,value in ipairs(values) do has[value] = true end
+	for position,arrayvalue in ipairs(array) do
+		if has[arrayvalue] then return arrayvalue, position end
+	end
+end
+
+function ArrayRemove(array,value)
 	if not value or not array then return end
 	for i,arrayvalue in ipairs(array) do
 		if arrayvalue==value then
@@ -1928,6 +1948,23 @@ function RemoveArrayValue(array,value)
 	end
 	return false
 end
+
+function ArrayRemoves(array,values)
+	-- values is an array or keyed table
+	-- returns the count of removals
+	if not values or not array then return end
+	keyed(values)
+	local removed = 0
+	local length = #array
+	for i=length,1,-1 do
+		if values[array[i]] then
+			table.remove(array,i)
+			removed = removed +1
+		end
+	end
+	return removed
+end
+
 
 function SubTablesContainKeys(tables,keys)
 	-- check for the existence of any key from subtables in keys
@@ -2009,9 +2046,20 @@ end
 
 function TableToArray(items)
 	local array = {}
-	local table_insert = table_insert
+	local count = 0
 	for _,item in pairs(items) do
-		table_insert(array,item)
+		count = count +1
+		array[count] = item
+	end
+	return array
+end
+
+function TableKeysToArray(items)
+	local array = {}
+	local count = 0
+	for key in pairs(items) do
+		count = count +1
+		array[count] = key
 	end
 	return array
 end
@@ -2064,20 +2112,22 @@ function ArrayAddKeyed(to, value, maxlength, first)
 	end
 end
 
-function ArrayAdd(to, value, maxlength, first)
+function ArrayAdd(to, value, maxlength, position)
 	-- adds a value to an array table if not already in the table
+	-- position=1 for first item, and implies removal from end with maxlength
+	if not value then return end
 	for _,this in ipairs(to) do
 		if value ==this then return end
 	end
 	if maxlength and #to >= maxlength then
-		if first then
-			table.remove(to,#to)
-			first = 1
+		if position then
+			to[#to] = nil
+			position = 1
 		else
 			table.remove(to,1)
 		end
 	end
-	to[first or #to+1] = value
+	to[position or #to+1] = value
 	return true
 end
 function InsertAfterArray(value,find,array)
@@ -2617,7 +2667,7 @@ function GetDate(userinput,nlocale,astable)
 		-- contains words (non-digits)
 		if a then a = string.lower(string_sub(a,1,3)) end
 		if b then b = string.lower(string_sub(b,1,3)) end
-		date.month = util.ArrayContainsValue(months,a) or util.ArrayContainsValue(months,b)
+		date.month = util.ArrayContains(months,a) or util.ArrayContains(months,b)
 		if month then
 			-- now lets get the day and year
 			a,b = string_match(userinput,"(%d+)%D*(%d*)")
@@ -2765,12 +2815,12 @@ function TableMacro(keys,macro)
 end
 
 function ListGrammatical(...)
-	-- returns an empty string if the list is empty
 	-- (list) defaults to «first, second and third.»
+	-- returns an empty string for an empty list, nil if missing
 	-- (list,", "," and ",".")
 	local arg = {...}
 	local list = arg[1]
-	if empty(list) then return end
+	if not list then return end
 	local delimiter = arg[2] or ", "
 	local last,terminator
 	if #arg>1 then
@@ -2817,14 +2867,16 @@ function InvertArray(array)
 	end
 end
 
-do local math_random = math.random
-function ShuffleArray(array,length)
-	-- providing length is a minor optimisation if the length is a maintained value
-	for i = length or #array, 2, -1 do -- Fisher-Yates shuffle
+function Shuffle(array)
+	-- fisher yates; modify in place
+	local count = #array
+	local math_random = math.random
+	for i = count, 2, -1 do
 		local j = math_random(i)
 		array[i], array[j] = array[j], array[i]
 	end
-end end
+	return array -- same table
+end
 
 function ArrayTrim(array,length)
 	-- returns a trimmed version of the array, which may be a new table
@@ -2857,9 +2909,10 @@ function ArrayRange(array,first,last,contains_nil)
 	return range
 end
 
-function SortArrayByKey (array,key,invert)
+function SortArrayByKey (array,key,invert,normalise)
 	-- invert=true typically results in descending sort, otherwise ascending
 	-- if a table without an array part, will not sort the original table but will return a new table
+	-- normalise is an optional function to run upon each value, such as tostring or tonumber
 	if empty(array) or not key then return
 	elseif not array[1] and next(array) then
 		-- convert table keys to an array
@@ -2867,17 +2920,32 @@ function SortArrayByKey (array,key,invert)
 	end
 	local comparator
 	if not invert then
-		comparator = function (a,b)
-			return (a[key] or 0) < (b[key] or 0)
+		if not normalise then
+			comparator = function (a,b)
+				return (a[key] or 0) < (b[key] or 0)
+			end
+		else
+			local normalise = normalise
+			comparator = function (a,b)
+				return normalise(a[key]) < normalise(b[key])
+			end
 		end
 	else
-		comparator = function (a,b)
-			return (a[key] or 0) > (b[key] or 0)
+		if not normalise then
+			comparator = function (a,b)
+				return (a[key] or 0) > (b[key] or 0)
+			end
+		else
+			local normalise = normalise
+			comparator = function (a,b)
+				return normalise(a[key]) > normalise(b[key])
+			end
 		end
 	end
 	table.sort(array,comparator)
 	return array
 end
+
 
 function SortArrayByLookup(array,lookup,invert,key)
 	-- lookup must be a table providing comparison values for array[key]

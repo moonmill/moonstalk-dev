@@ -27,7 +27,7 @@ function Starter() -- run per-site after all sites and applications have loaded
 			end
 		end
 	end
-	if util.ArrayContainsValue(node.curators,"matchdomains") then
+	if util.ArrayContains(node.curators,"matchdomains") then
 		log.Info(#domains_patterns.." wildcard domains enabled")
 	elseif #domains_patterns >0 then
 		log.Alert(#domains_patterns.." wildcard domains disabled")
