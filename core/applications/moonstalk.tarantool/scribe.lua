@@ -1,27 +1,30 @@
 -- NOTE: currently only supports openresty
 -- TODO: add support for plain Lua and move to client.lua, enabling in functions
+ -- FIXME: move these to a new client file which includes the serve functionality to setup db.* interfaces
 
-msgpack.NULL = "\xc0" -- FIXME: ???
+msgpack.NULL = msgpack.NULL or "\xc0" -- FIXME: ???
 
 tarantool.client = require"moonstalk.tarantool/client" -- WAS: package="lua-resty-tarantool"
 local tarantool_client = tarantool.client
 
+function tarantool.Connect(interface)
+	-- WARNING: does not use moonstalk.Resume DO NOT USE; is only called from the starter for initial setup
+	local result,err
+	request[interface],err = ngx.socket.tcp()
+	if err then return moonstalk.Error{tarantool, level="Priority", title="socket error: "..err, ready=true} end
+	interface.connected = now
+	result,err = tarantool_client.connect(interface)
+	if not result then return moonstalk.Error{tarantool, level="Notice", title="connection failure with "..interface.role, detail=err, ready=true} end
+	request[interface]:setkeepalive(0)
+	return true
+end
+
+-- NOTE: as all internal handling is within moonstalk.Resume, errors cannot be generated as they involve changing the environrment which is not restored until Resume has finished; errors are therefore returned as tarantool.ERROR,{…} and the invoking handler must check if the response is tarantool.ERROR and if so give the the error table to scribe.Error and return this to the calling function
+local tarantool_ERROR = tarantool.ERROR
 local function Error(err,detail)
 	if type(err) ~='table' then err = {tarantool, title=err, level="Notice"} end
 	err.detail = err.detail or detail
-	return scribe.Error(err)
-end
-
-function tarantool.Connect(interface)
-	if request[interface] then request[interface]:close() end
-	local result,err
-	request[interface],err = ngx.socket.tcp()
-	if err then return moonstalk.Error{tarantool, level="Priority", title="socket error: "..err} end
-	interface.connected = now
-	-- request[interface]:settimeout(1000) -- HACK: this fixed the frequent corrupted msgpack transactions, but is only used for the initial connection on server startup
-	result,err = tarantool_client.connect(interface)
-	if not result then return moonstalk.Error{tarantool, level="Notice", title="connection failure with "..interface.role, detail=err} end
-	return true
+	return tarantool_ERROR, err
 end
 
 if moonstalk.initialise.coroutines ~=false then
@@ -35,9 +38,9 @@ if moonstalk.initialise.coroutines ~=false then
 		local server,err = ngx.socket.tcp()
 		local result,err = server:connect(interface.host, interface.port, interface.socket_options)
 		if not result then return Error("database connection failure to "..interface.role, err) end
-		request[interface] = server -- FIXME: remove this in the client
+		request[interface] = server -- FIXME: remove this in the client and restore use of the interface
 		if server:getreusedtimes() ==0 then -- connection is freshly established, the server probably restarted, else the connection has been in the pool a while
-			-- technically if we called tarantool.connect each time teh handshake and authentication woudl be transparently handled for us, albeit at teh cost of invoking serveral additional functions thus we've hoisted that functionality inline here
+			-- technically if we called Connect each time teh handshake and authentication woudl be transparently handled for us, albeit at teh cost of invoking serveral additional functions thus we've hoisted that functionality inline here
 			-- request[interface]:settimeout(1000) -- HACK: this fixed the frequent corrupted msgpack transactions, but is only used for the initial connection on server startup
 			result,err = tarantool_client.handshake(interface)
 			if not result then return Error("database reconnection failure to "..interface.role, err) end
@@ -74,7 +77,11 @@ if moonstalk.initialise.coroutines ~=false then
 		do
 			local method = tarantool.client[name]
 			local moonstalk_Resume = moonstalk.Resume
-			tarantool.methods[name] = function(interface, ...) return moonstalk_Resume(TarantoolServerMethod, interface, method, nil, ...) end
+			tarantool.methods[name] = function(interface, ...)
+				local response,error = moonstalk_Resume(TarantoolServerMethod, interface, method, nil, ...)
+				if response ==tarantool_ERROR then return scribe.Error(error) end
+				return response,error
+			end
 			tarantool.methods[tarantool.methods[name]] = name -- for introspection
 		end
 	end
@@ -82,9 +89,10 @@ if moonstalk.initialise.coroutines ~=false then
 	tarantool.methods.call = function(interface,procedure,...)
 		log.Debug("calling tarantool procedure "..procedure)
 		local arg = {...}; if not arg[1] then arg = nil end
-		return moonstalk_Resume(TarantoolServerMethod, interface, tarantool_client_call, nil, procedure, arg)
-		--return result[1],result[2]
-	end
+		local response,error = moonstalk_Resume(TarantoolServerMethod, interface, tarantool_client_call, nil, procedure, arg)
+		if response ==tarantool_ERROR then return scribe.Error(error) end
+		return response,error
+end
 end
 
 

@@ -360,7 +360,7 @@ local function tnt_request(self, header, body)
         sock:close()
     return nil,  format('Failed to get response header and body: %s.', err)
   end
-  response_header,response_body = msgpack_unpack(header_and_body)
+  local response_header,response_body = msgpack_unpack(header_and_body)
   -- If not a table then is empty.
   if type(response_body) ~= 'table' then return nil,"non-table response" end -- used to set to {}
   -- Return the response as a table with the data and the metadata.

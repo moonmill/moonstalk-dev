@@ -1,8 +1,10 @@
 -- scribe is responsible for defining access to and maintaining sites, plus generating and rendering views (including their controllers), it does not however provide any sites itself (see sitesfolder and tenant)
 -- WARNING: in async servers except those using LuaJIT, View and Controller use pcall/xpcall which are not resumable and thus cannot contain yielding code -- TODO: add a toggle to remove this and run them unprotected which will of course break error handling and require a handler to catch the server's thrown error, if possible
 -- OPTIMIZE: use a top level pcall in openresty and remove the view/controller pcalls except in dev mode as they provide more nuanced errors; but such a generic handler could in any case simply look at the page.state to define it's error title; we could also re-run the request enabling xpcall instead
+-- WARNING: pages with variable content must set page.modified=false (e.g. on their address) or to the timestamp of their most recent content (using their controller); else they will use their primary view's modified date reuslting in caching being used
 
 states = {[0]="creation",[1]="curation",[2]="collation",[3]="form",[4]="identification",[5]="authentication",[6]="controller",[7]="view",[8]="template",[9]="",[10]="editing",[15]="abandoned"} -- only controller and view are set in all modes (due to introspection requirement for extensions), otherwise dev mode is required
+editors = {} -- points for functions to names
 
 default_site = {
 	language=node.language,
@@ -24,7 +26,6 @@ default_site = {
 	applications={},
 	redirect=true,
 }
-setmetatable(default_site.editors,{__newindex=function(t,key,value) page.editors={value}; util.Append(site.editors,page.editors) end}) -- permits table.insert(page.editors,Func) converting it to a copy of site.editors with the new function first; further insertions will be last -- NOTE: page.editors={} will disable the site editors
 
 hits = 0
 
@@ -103,7 +104,7 @@ function Request() -- request can be built in the server, typically by calling t
 		if string_sub(page.address,-1,-1)~="/" then page.address= string_sub(page.address,2)
 		else page.address= string_sub(page.address,2,-2) end
 		page.address,page.transliterated = util_Transliterate(page.address,true) -- a 'normalised' URI string value is transliterated and lowercase but punctuation is preserved; should an application need to compare address-path input with a normalised value it may call Normalise() or gsub(address,"[%p]","")
-		page.paths = split(page.address,"/") -- if we need to lookup path components use util.ArrayContainsValue(page.paths,"normalised_value") or if there's multiple potential values first call keyed(page.paths)
+		page.paths = split(page.address,"/") -- if we need to lookup path components use util.ArrayContains(page.paths,"normalised_value") or if there's multiple potential values first call keyed(page.paths)
 	end
 
 	-- # Curation etc : Lookup the site
@@ -119,7 +120,7 @@ function Request() -- request can be built in the server, typically by calling t
 		-- we don't handle the scenario of a missing site, as the generic application adds a final curator to handle that
 	end
 	_G.site = site
-	log.Info() if not node.production and site.domains[request.domain] and site.domains[request.domain].staging then site.domain = request.domain end -- ensures staging domains are used in place of the default; must check if domain is defined as wildcard domains will not and can not be used for staging; only enabled with high log level thus typically not on production servers
+	log.Info() if node.environment ~="production" and site.domains[request.domain] and site.domains[request.domain].staging then site.domain = request.domain end -- ensures staging domains are used in place of the default; must check if domain is defined as wildcard domains will not and can not be used for staging; only enabled with high log level thus typically not on production servers
 
 	-- # Routing etc : Map the view/controller
 	page.state = 2
@@ -130,6 +131,7 @@ function Request() -- request can be built in the server, typically by calling t
 	end
 	if not page.collate then
 		page.view = "generic/not-found"
+		request.form = EMPTY_TABLE
 	elseif bodyless_methods[request.method] then
 		request.form = EMPTY_TABLE
 	else
@@ -163,6 +165,8 @@ function Request() -- request can be built in the server, typically by calling t
 			end		
 			-- Log the form, but truncating long values
 			log.Debug() local logform=truncate(form,42) if form.password then logform.password="…" end log.Debug(logform)
+		else -- FIXME: ionstead of this we should just set a default for form, bearing in mind authentication expects it
+			request.form = EMPTY_TABLE
 		end
 	end
 
@@ -171,62 +175,67 @@ function Request() -- request can be built in the server, typically by calling t
 	-- where curation wants to include the user, the curator should perform this itself
 	local client = request.client
 	if request.cookies[site.token_name] or request.query["≈"] then -- this query argument makes it possible to use a token to sign-in on any URL, but is thus a protected argument name; this is not strictly necessary to support in the generic codebase as is a fairly specific requirement, however the alternative would require using a collator function to perform the check and set the value
-		page.state = 4
-		-- authentication populates language.locale,timezone else defaults to the site
+		-- authentication populates language,locale,timezone else defaults to the site
 		client.token = request.query["≈"] or request.cookies[site.token_name] -- this indicates a signed-in or previously identified user
 		client.id = util.DecodeID(client.token) -- matches an existing session ID; failure is silent (eg. if node.secret was changed) or in case of attack, and for protected resources would get caught by locks resulting in unauthorised, otherwise the usual signed-out representation
-	elseif not client.session and request.cookies.preferences then
-		-- the preferences cookie is strictly an application routine, but is never expected to be used alongside a session (typically populated by a database interface); it is sufficiently common that we inline the condition handling rather than invoking additional handlers; the normalised keys from this thus need copying
-		client.preferences = json.decode(request.cookies.preferences)
-		client.language = client.preferences.language
-		client.locale = client.preferences.locale
-		client.timezone = client.preferences.timezone
-	elseif site.vocabulary and request.headers['accept-language'] then
-		for lang_locale,language,locale in string_gmatch(string_lower( request.headers['accept-language'] ),"[q%A]*((%a*)%-?(%a*))") do
-			if language =="" then break
-			elseif site.vocabulary[language] then -- this is built from translated views, and the site's own vocabulary, so must define languages that shall be supported for matching with a client; client.language will thus never be an unsupported value and cannot be used for profiling
-				client.language = language
-				if locale and locales[lang_locale_match] then
-					client.locale = lang_locale_match
-				elseif locales[locale] then
-					client.locale = locale
-				end
-				break
-			end
-		end
 	end
-	client.language = client.language or site.language
-
 
 	-- # client authentication
 	-- this depends upon page.locks, however may be disabeld with locks=false; a collator may perform authentication earlier; use of locks requires authenticator="namespace.Function", either inherited from site, specified on an address, or added to the page as a page.Authenticator function by a collator
-	if page.locks then
-		page.state = 5
-		page.Authenticator = page.Authenticator or site.Authenticator
+	if page.locks or page.Authenticator or site.Authenticator then
+		page.state = 4
 		local unlocked
-		if (client.id or request.form.action =="Signin") and page.Authenticator and page.Authenticator() then -- authenticator functions must return true if they succeed in getting a user; error cases should return scribe.Error; authenticators fetch the user identified by the request.client.token and populate the _G.user table generally with at least nick and a keychain
+		if (client.id or request.form.action =="Signin") and (page.Authenticator or site.Authenticator)() and page.locks then -- authenticator functions must return true if they succeed in getting a user; error cases should return scribe.Error; authenticators fetch the user identified by the request.client.token and populate the _G.user table generally with at least nick and a keychain
 			-- to avoid invoking when unnecessary, either the token cookie needs to be present (i.e. set upon signin) or a token query param needs to be provided which the authenticator will usually attempt to exchange for a corresponding cookie; authenticator functions should not invoke errors if the token is invalid and should generally remove it silently; if a page is locked after invocation the scribe will itself show the authenticate page
 			-- now that we may have a user, we can validate against page if locked
 			page.headers['Cache-Control'] = "no-cache" -- nothing with authentication restrictions should be cached; this is currently implemented by Kit
-			page.headers.Vary = util.AppendToDelimited("Cookie", page.headers.Vary, ",") -- ensure caches refresh protected content when requested with a cookie
-			if not next(page.locks) then -- running the 
-				unlocked = true
-			else
-				for _,key in ipairs(page.locks) do
-					if request.client.keychain[key] then
-						unlocked = true
-						log.Debug("unlocked with key: "..key)
-						break
-					end
+			client = request.client -- we use an upvalue but SetSession uses the global
+			for _,key in ipairs(page.locks) do
+				if client.keychain[key] then
+					unlocked = true
+					log.Debug("unlocked with key: "..key)
+					break
 				end
 			end
-		log.Debug() elseif not page.Authenticator then log.Debug("no authenticator available")
 		end
-		if not unlocked then
+
+		if page.locks and not unlocked then
 			log.Debug() if page.locks then log.Debug("no key for locks: "..util.ListGrammatical(page.locks)) end -- may have been removed by abandoned error
 			scribe.Unauthorised()
 		end
 	end
+
+	if not user then -- there's no token or authentication failed
+		if site.polyglot and not page.language then -- not relevent for non-localised sites; must not set if the page declared a language (has a translated address, as preferences have not been applied which we're about to do) -- NOTE: this is not strictly a core function however until we refactor to chained handlers it is necessary at this point and is very low cost
+			page.headers.Vary = util.AppendToDelimited("Cookie", page.headers.Vary, ",") -- ensure caches refresh content when requested with a different language
+		end
+
+		if request.cookies.preferences then
+			-- the preferences cookie is strictly an application routine, but is never expected to be used alongside a session and should be removed when a (persistent) session is established  (typically populated by a database interface); it is sufficiently common that we inline the condition handling rather than invoking additional handlers; the normalised keys from this thus need copying
+			page.state = 5
+			client.preferences = json.decode(request.cookies.preferences)
+			client.language = client.preferences.language
+			client.locale = client.preferences.locale
+			client.timezone = client.preferences.timezone
+		elseif site.polyglot and request.headers['accept-language'] then
+			page.state = 5
+			local client = request.client
+			for lang_locale,language,locale in string_gmatch(string_lower( request.headers['accept-language'] ),"[q%A]*((%a*)%-?(%a*))") do
+				if language =="" then break
+				elseif site.vocabulary[language] then -- this is built from translated views, and the site's own vocabulary, so must define languages that shall be supported for matching with a client; client.language will thus never be an unsupported value and cannot be used for profiling
+					client.language = language
+					if locale and locales[lang_locale_match] then
+						client.locale = lang_locale_match
+					elseif locales[locale] then
+						client.locale = locale
+					end
+					break
+				end
+			end
+			client.language = client.language or site.language -- final fallback
+		end
+	end
+
 
 
 	-- # Localisation
@@ -248,7 +257,6 @@ function Request() -- request can be built in the server, typically by calling t
 	if page.view then -- defined by binder/address although a controller may specify it instead of calling scribe.View directly
 		page.state = 7
 		scribe_View(page.view) -- final call, flag to render not-found view
-		-- TODO: page.headers.Vary = util.AppendToDelimited("Accept-Language", page.headers.Vary, ",") -- ensure caches refresh content when requested with a different language
 	end
 
 	if page.type =="html" and page.template ~=false then -- page.template==nil infers use of site.template; page.type~=html infers no template
@@ -263,8 +271,8 @@ function Request() -- request can be built in the server, typically by calling t
 
 
 	-- # Post-processing
-	if page.modified and not page.locks then -- POST invalidates cached pages in browsers thus resulting in last-modified being ignored so we do not need to handle
-		page.headers["Last-Modified"] = page.headers["Last-Modified"] or util_HttpDate(page.modified or page.created) -- don't change if already set, otherwise nil if no dates; must disable when logging>4 to prevent webserver sending 304 not-modified
+	if page.modified then -- POST invalidates cached pages regardless of this header; pages with variable content must set page.modified=false or to a timestamp
+		page.headers["Last-Modified"] = util_HttpDate(page.modified) -- not set if no date
 	end
 
 	page.headers["X-Powered-By"] = scribe_xpowered
@@ -273,7 +281,7 @@ function Request() -- request can be built in the server, typically by calling t
 		-- editors are applied to all content-types, thus they must check this themselves
 		page.state = 10
 		for _,Editor in ipairs(page.editors) do
-			log.Debug("applying "..(site.editors[Editor] or "page")..".Editor")
+			log.Debug("applying "..(scribe.editors[Editor] or "anonymous page.Editor"))
 			Editor()
 		end
 	end
@@ -339,7 +347,7 @@ function View(path)
 	if view.translated then -- FIXME:
 		view = view[request.client.language] or view[request.client.locale] or view -- the assumption is that the first language contains a locale and is therefore the best match
 	end
-	page.language = page.language or view.language or site.language -- the only value actually copied from view to page unless it has been defined elsewhere (probably address)
+	page.language = page.language or view.language -- the only value actually copied from view to page unless it has been defined elsewhere (probably address)
 	log.Debug("running view: "..view.path)
 	log.Info() scribe.LoadView(view) -- development mode; reload with every request -- the prefixed log call on this line ensures the line is disabled for lower log levels
 	-- NOTE: unlike addresses, flags from the view are not copied to the page, therefore necessary values must be explictly set
@@ -369,7 +377,7 @@ function View(path)
 		return result
 		--]]
 	end
-	if page.modified ==nil then page.modified = view.modified end -- best practice is to have a modified date so we use that of the first rendered view, typically the main content, otherwise must be explictly set
+	if page.modified ==nil then page.modified = view.modified end -- best practice is to have a modified date so we use that of the first rendered view, typically the main content, otherwise must be explictly set; -- NOTE: view may set modified = false as this runs after the view
 end
 scribe_View = View
 function ViewSandbox(path,env)
@@ -408,7 +416,6 @@ function Cookie(meta,value)
 		_G.page.cookies[meta] = {value=value}
 	else
 		_G.page.cookies[meta.name] = meta
-		meta.name = nil
 	end
 end
 function SetCookies()
@@ -417,14 +424,9 @@ function SetCookies()
 		if not cookie.value then -- delete
 			cookie.expires = 0
 			cookie.value = ""
-		elseif cookie.expires then
-			cookie.expires = now+cookie.expires
 		end
 		local setcookie = {name.."="..cookie.value} -- TODO: value should be encoded
-		if cookie.expires then
-			table_insert(setcookie, "max-age="..cookie.expires)
-			-- table_insert(setcookie, "expires="..os.date("!%a, %d %b %Y %H:00:00 UTC",cookie.expires))
-		end
+		if cookie.expires then table_insert(setcookie, "max-age="..cookie.expires) end
 		table_insert(setcookie, "path="..(cookie.path or "/")) -- must set path to root else browsers default it to current path
 		if cookie.domain then table_insert(setcookie, "domain="..cookie.domain) end
 		for _,attribute in ipairs(cookie) do table_insert(setcookie, attribute) end
@@ -443,14 +445,17 @@ end
 
 function Token(id)
 	-- assign an ephemeral session token (not necessarily yet a session-linked ID unless id is created elsewhere and passed, but may be reused as such when created here)
-	-- should be called whenever the user has commenced a new visit (e.g. has been more than x hours since last visit) to extend the expiry; when called for this purpose request.client.id must be provided as the argument else a new ID will be generated
+	-- should be called whenever the user has commenced a new visit (e.g. has been more than x hours since last visit) to extend the expiry
+	log.Debug() if not id and not request.client.id then log.Debug("assigning new client.id") end
 	request.client.id = id or request.client.id or util.CreateID()
-	if id or not request.client.token then request.client.token = util.EncodeID(id or request.client.id) end -- only if new
+	request.client.token = request.client.token or util.EncodeID(request.client.id)
 	local cookie
 	if site.token_cookie then cookie = copy(site.token_cookie) else cookie = {} end -- must be copied as is set upon response which may be interrupted by async operations that could also set tokens
 	cookie.name = cookie.name or "token"
 	cookie.value = request.client.token
-	cookie.expires = cookie.expires or time.month*3
+	if not cookie.expires and site.token_cookie and site.token_cookie.expires then
+		cookie.expires = site.token_cookie.expires end
+	cookie.expires = cookie.expires or time.month*3 -- when token is renewed this is rolling so applies after the last renewal, i.e. the user must login at least once every 3 months
 	util.ArrayAdd(cookie,"HttpOnly")
 	if site.provider ~=false and node.tenant and node.tenant.subdomain and string_sub(request.domain,#node.tenant.subdomain*-1) ==node.tenant.subdomain then
 		--  if the current domain has the same node tenant subdomain we assign the cookie to the subdomain -- TODO: support for this should be in the tenant or SaaS application, or we should simply set the cookie from the signin controller where any domain may be specified, rather than here
@@ -469,7 +474,6 @@ function Unauthorised()
 		scribe.Abandon "generic/signin"
 	end
 	page.status = 403
-	_G.page.headers.Vary = util.AppendToDelimited("Cookie", page.headers.Vary, ",")
 	log.Debug("identification required")
 	if site.controllers[page.view] then _G.page.controller = page.view end
 	-- NOTE: -- the originally specified template is used, and its view and controller must therefore handle both Guest and out states
@@ -614,7 +618,7 @@ end
 do local file_cache={}
 function Include(path)
 	-- reads and caches a file, inserting it into the output
-	-- typically used for inlineing content that has been saved as a seperated self-contained file for better speration, e.g. <script>?(scribe.InlineFile"view.js")</script>
+	-- typically used for inlining content that has been saved as a seperated self-contained file for better speration, e.g. <script>?(scribe.InlineFile"view.js")</script>
 	-- TODO: watch the file for changes and update the cache automatically
 	-- TODO: use file discovery, starting with site.path then application path, and cache the results per site
 	if not file_cache[path] or logging >3 then
@@ -766,7 +770,7 @@ end
 function Starter()
 	if moonstalk.server ~="scribe" then return end
 	scribe.Abandon = scribe._Abandon; scribe._Abandon = nil
-	return function() -- a finaliser
+	return function() -- an initialisation finaliser
 		moonstalk.Error = scribe.Error -- from this point errors can be handled in requests
 	end
 end
@@ -848,7 +852,7 @@ function Site(site)
 			local redirect_append = domain.redirect_append ==true
 			if not redirect_append and site.redirect_append ==true then redirect_append = true end
 			moonstalk.domains[domain.name] = {urns_exact={},language=node.language, controllers=moonstalk.applications.generic.controllers, views=moonstalk.applications.generic.views, errors={}, urns_patterns={{pattern=".", collate={scribe.RedirectCollator}, redirect= domain.redirect or site.redirect or ifthen(site.secure,"https://"..site.domain,"http://"..site.domain), redirect_append=redirect_append}}} -- a bit convoluted, compared simply an «if site.redirect» in the Request handler however sites that redirect should be rarely used and keeps the Request handler cleaner -- we need urns_exact as binder will evaluate it before attempting the patterns, and we also need language for establishing the page envionrment and controllers for the actual handling
-		elseif not node.production or not domain.staging then -- only add staging domains on non-production nodes to prevent access to staging features
+		elseif node.environment ~="production" or not domain.staging then -- only add staging domains on non-production nodes to prevent access to staging features
 			moonstalk.domains[domain.name] = site -- pointer
 		end
 	end
@@ -863,7 +867,7 @@ function Site(site)
 				local collator = scribe.GetTablePath(name..ifthen(string.find(name,".",1,true),".Collator",""))
 				if not collator then
 					moonstalk.Error{site, title="Unknown collator: "..name}
-				elseif not util.ArrayContainsValue(site.collate, collator) then
+				elseif not util.ArrayContains(site.collate, collator) then
 					table.insert(site.collate, collator)
 					log.Info ("  collator = "..name)
 				end
@@ -956,7 +960,7 @@ function EnableSiteApplication(bundle,name,dependent)
 	copy(application.views, bundle.views, false, false)
 	if application.Editor then -- TODO: allow apps to declare priorities
 		table.insert(bundle.editors,application.Editor)
-		bundle.editors[application.Editor] = application.id
+		scribe.editors[application.Editor] = application.id..".Editor"
 	end
 
 	if application.Site then -- we never enable "scribe" for an app or site, thus scribe.Site will not be called as it would be recursive
@@ -1022,19 +1026,41 @@ function Unknown()
 	return moonstalk.sites.localhost
 end
 
+function PageEditor(func)
+	-- WARNING: DO NOT use table.insert(page.editors,…) as this is the same as site.editors; instead this function converts it to a copy of site.editors with the new function first
+	-- NOTE: simply assigning a new table to page.editors={} will replace the site editors with those specified
+	if page.editors ==false then return end
+	local editors = page.editors
+	if not editors.converted then
+		editors = {func, converted=true}
+log.Append("convert to page editors "..tostring(editor).." on "..tostring(_G.request)) -- FIXME:
+		for _,editor in ipairs(site.editors) do table.insert(editors,editor) end
+		_G.page.editors = editors
+	else
+log.Notice("adding to converted editors "..tostring(page.editors).." on "..tostring(_G.request))
+		table.insert(editors,func)
+	end
+end
+
+-- the following Abandon functions implement a simplified controller-view-template mechanism that is invoked as an editor, run either with continuation in the Request handler after setting all incompleted state functions to false, or may be called after being thrown with assert
 function Abandon() end -- placeholder during intialisation
 do local function RenderAbandon(name,object)
 	if not object then
-		scribe.Error("Couldn't abandon to missing view "..name)
+		scribe.Error("Couldn't abandon to missing view "..(name or "unknown"))
 		return false
 	elseif object.static then
 		write(object.static)
-	elseif not pcall(object.loader) then
-		scribe.Error("Couldn't abandon due to error in view "..object.id..": "..response)
-		return false
+	else
+		page.template = true
+		if not pcall(object.loader) then
+			scribe.Error("Couldn't abandon due to error in view "..object.id..": "..response)
+			return false
+		end
 	end
+	return true
 end
 function AbandonedEditor()
+	if not page.abandoned then return end -- FIXME: abandonedEditor is being wonrgly set, this prevents it running until idenitified where
 	-- generates a page containing the collected errors
 	page.sections = {output="content",content={"",length=1}}
 	_G.output = page.sections.content
@@ -1043,15 +1069,15 @@ function AbandonedEditor()
 		scribe.Error("Couldn't abandon due to error in controller "..page.abandoned..": "..response)
 		page.abandoned = "generic/error"
 	end
-	if RenderAbandon(page.abandoned, site.views[page.abandoned]) ==false then
-		if page.abandoned =="generic/error" or RenderAbandon(page.abandoned, generic.views.error) == false then -- must check if we've already tried rendering such as in case controller failed; if it failed in eitehr case we still use the template only with serialised error output
+	if not RenderAbandon(page.abandoned, site.views[page.abandoned]) then
+		if page.abandoned =="generic/error" or not RenderAbandon(page.abandoned, generic.views.error) then -- must check if we've already tried rendering such as in case controller failed; if it failed in eitehr case we still use the template only with serialised error output
 			page.sections.content={util.SerialiseWith(page.errors,"html"),length=1}
 			_G.output = page.sections.content
 		end
 	end
 	scribe.Section"template"
-	if RenderAbandon("template", site.views["template"] or site.views["generic/template"]) ==false then
-		if RenderAbandon("template", generic.views.template) ~=false then
+	if not RenderAbandon("template", site.views["template"] or site.views["generic/template"]) then
+		if RenderAbandon("template", generic.views.template) then
 			page.sections.template={"",length=1}
 			_G.output = page.sections.template
 		else
@@ -1060,6 +1086,8 @@ function AbandonedEditor()
 	end
 	_G.output = table.concat(_G.output)
 end
+scribe.editors[scribe.AbandonedEditor] = "scribe.AbandonedEditor"
+
 function _Abandon(to)
 	-- takes either a numeric status in which case no content is rendered, or a page name in which case that page (view and/or controller) is responsible for setting the page.status else it defaults to 500
 	-- disables any further in-request handling when not using a top-level server pcall
@@ -1067,9 +1095,10 @@ function _Abandon(to)
 	-- does not use the usual scribe renderers and for simplicty implements its own
 	-- site template must be capable of running without its controller (i.e. only references the root of page.temp)
 	-- assumes the view uses a template -- TODO: check view.template
+	-- site.editors are preserved and should not therefore make assumptions about the valid state of a page, output should however be valid for manipulation
 	-- TODO: (low) an error before the end of a view's output that does not return/is not caught results in additional output that should be dropped; only applies to non top-level pcall use
 	to = to or "generic/error"
-	log.Info("Abandoning to "..(to or "[empty]").." from "..(page.address or request.path or '-none-'))
+	log.Info("Abandoning to "..to.." from "..(page.address or request.path))
 	if page.abandoned then return end -- no need to reset all the atributes again in case there's multiple errors
 	page.abandoned = to
 	page.headers = {}
@@ -1079,7 +1108,6 @@ function _Abandon(to)
 	page.view = false
 	page.controller = false
 	page.template = false
-	page.editors = {scribe.AbandonedEditor} -- generates the output to return as the response, and may change the status etc
 	page.cookies = false
 	page.status = 500 -- default, the given page may override
 	if type(to) =='number' then
@@ -1088,12 +1116,13 @@ function _Abandon(to)
 		page.editors = false
 		return
 	end
+	scribe.PageEditor(scribe.AbandonedEditor)
 end end
 
 function Errored(err,trace)
 	-- handles an error caught interrupting scribe.Request
 	local state = scribe.states[page.state]
-	err = {title="Error in "..state, detail=err}
+	err = {title="Error in "..state, detail=err, trace=trace}
 	if type(page[state]) =='string' then
 		err.title = err.title .." '".. page[state] .."'"
 	end
@@ -1120,7 +1149,7 @@ function Error(err)
 	err.identifier = request.identifier -- to aggregrate cascading errors
 	page.error = page.error or {} -- we don't currently collect more than one error, but it is possible for multiple to occur such as when a view and template fail
 	table.insert(page.error,err)
-	scribe.Abandon "generic/error"
+	scribe.Abandon()
 	return nil,err.title
 end
 
@@ -1133,10 +1162,12 @@ function Errorxp(err)
 	if page.state >=6 and page.state <=8 then
 		-- controllers and views
 		local name = string.match(err.detail,"([^:]+)")
-		err.trace = string.gsub(err.trace,name..":.-\n","")
+		err.trace = string.gsub(err.trace or "",name..":.-\n","")
 	end
-	local snip = string.find(err.trace,"[C]",40,true)
-	if snip then err.trace = string.sub(err.trace,1,snip-2) end
+	if err.trace then
+		local snip = string.find(err.trace,"[C]",40,true)
+		if snip then err.trace = string.sub(err.trace,1,snip-2) end
+	end
 	err.detail = web.SafeText(err.detail)
 	if logging > 3 then
 		err.trace = web.SafeText(err.trace)
@@ -1440,7 +1471,7 @@ function ConfigureBundle(bundle,kind)
 				-- file and name preserve accented chars, uri and id are normalised
 				-- preserve an existing name/id's table or set to this one if the first
 
-				-- dotted segments in file names indicate localisation, otherwise are not allowed
+				-- dotted segments in file names indicate localisation, otherwise are not allowed except some such as .vocab.lua
 				-- NOTE: translated files may use either format uri.lang.ext or uri.lang.lang-uri.ext, where the prior results in the scribe not assigning addresses for the translated files, and another routine will be required to address them, such as a collator using cookie or url prefix/domain, the latter defines a language-specific address uri, however it cannot be the same as any other language unless site.localise=true -- TODO:
 				local locale,localised_name = string.match(file.name,"%.([^%.]*)%.?(.*)$")
 				local merged_uri = file.file -- we don't merge different types
@@ -1520,7 +1551,9 @@ function ConfigureBundle(bundle,kind)
 						local result,msg = pcall(loader.handler,file,bundle)
 						if not result then moonstalk.BundleError(bundle,{realm="bundle",title="Error loading file "..file.file,detail=msg}) end
 					end
-					if site.files[file.name..".vocab.lua"] then
+					if site.files[file.id..".vocab.lua"] then
+						site.polyglot = true
+						file.ployglot = true
 						scribe.ImportViewVocabulary(site,bundle.views[file.id])
 					end
 					counts.views = counts.views +1
@@ -1591,6 +1624,7 @@ function ConfigureBundle(bundle,kind)
 							branch.vocabulary = view.vocabulary -- add the vocabulary to the address so it gets copied to the page
 							branch.translated._vocabulary = branch.vocabulary -- serves as a flag to map the address for each translated language, but only after explicit language declarations after we've iterated all the addresses for such explicit declarations
 							branch.translated._urn = match
+							urn.polyglot = true
 						end
 					end
 				end

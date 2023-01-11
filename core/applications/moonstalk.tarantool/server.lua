@@ -1,4 +1,5 @@
 -- configuration routines for using the Tarantool envionrment, and Lua functions (aka stored procedures) for aggregation, conditional handling and normalisation (using the schema); tarantool servers are started from temporary files created by the elevator that then initialise themselves with this environment
+-- includes a testing featurein debug mode that allows faking the server time anywhere now() is used, simply by setting tt.now_offset to a desired number of seconds; its value must be set to nil to restore normal time bearing in mind that tasks will have been scheduled further into the future; to force the task scheduler to run without waiting for the window to expire the fucntion that sets now_offset may after doing so create a dummy task.at=tt.now() thus forcing the scheduler to run
 -- WARNING: returns that are empty tables are discarded by the Tarantool protocol encoding, use return {n=0} or somesuch
 -- NOTE: do not return with no parameters, use return nil
 -- NOTE: tuples are constants representing the in-memory msgpack data, thus efficient to read from; some of our procedures modify need to modify Lua tables, such as when using _updates, in which cases only reading from these and recoding for Lua is more efficient with only the needed fields, than doing so for all a tuples fields
@@ -22,6 +23,97 @@ _G.csv = require"csv" -- {package=false}; built-in
 NULL = box.NULL
 ERROR = "\0"
 
+tasks = {
+	window	= 60, -- to check for new tasks, any new task needed sooner (at=0) involve killing the sleeping coroutine and recreating it to run immediately, therefore in high demand environments this should be set as low as possible, e.g. 1sec thus avoiding the need to cancel and recreate
+	pending	= {count=0}, -- reverse order with highest index and lowest timestamp (closest in future) the next to run, whilst the lowest index and highest timestamp (further in future)
+	running = {},
+	errors = {},
+	wakeup = now, -- time for lazy tasks to be run on next wakeup window
+} -- TODO: persistence saving to a record, and also building tasks.named[task.handler]=at with the earliest time; probably easiest to use databin, thus avoiding startup overhead
+-- TODO: instance allocation
+do
+	local pending = tt.tasks.pending
+	-- TODO: reschedule a task that's already pending
+	function tasks.Runner(task)
+		-- WARNING: expects server to be using UTC (or a time zone without daylight savings changes) and does not use the monotonic fiber.clock; time localisation should be performed with client context
+		-- runs as new fiber to prevent being cancelled with the scheduler, permitting safe use of fiber.yield -- TODO: test
+		-- as an async task it will already have been removed from pending as this does not run until the next yield
+		log.Info("running task "..task.handler)
+		table.insert(tt.tasks.running,task) -- not more simply by name as we could have multiple instances of the same task running, each of which has its own task table
+		task.finished = nil
+		log.Info() task.starting = nil
+		task.started = tt.now()
+		local scheduled = task.at
+		local result,err = pcall(util.TablePath(task.handler), task)
+		if err then table.insert(tt.tasks.errors, task.handler.." at "..os.date()..": "..err); moonstalk.Error{level="Priority", title="task "..task.handler.." failed", detail=err}
+		elseif task.at ~=scheduled then
+			task.run = (task.run or 0) +1
+			task.reschedule = nil
+			log.Debug("rescheduling task "..task.handler)
+			tt.Task(task)
+		end
+		task.finished = tt.now()
+		task.timer = task.finished - task.started
+		task.started = nil
+		util.ArrayRemove(tt.tasks.running,task)
+		-- TODO: poll=true; move to a finished table that we keep trimmed, and permit lookup by id
+	end
+	function tasks.Scheduler()
+		-- currently only supports a single task at a time
+		-- TODO: support resource limits and concurrent tasks (i.e. scheduling a new task if the current is waiting on async actions such as webservices or processes), allow them to run concurrently rather than getting stuck in a single task queue); tasks would thus need to indcate async=false if not cooperative, else indicate their resource usage, e.g. http=1, cpu=1
+log.Alert("sched starting")
+		while true do
+			local now = tt.now()
+log.Alert("sched loop")
+	log.Alert{now,os.time()}
+			local wakeup = now +tt.tasks.window
+			local task = pending[pending.count]
+			local sleep
+			if not task or task.at > wakeup then -- not due before next wakeup
+				log.Debug(ifthen(pending.count>0,"scheduler sleeping with "..pending.count.." tasks"))
+				tt.tasks.wakeup = wakeup
+				fiber.sleep(tt.tasks.window)
+			elseif task.at <= now then -- due
+				log.Info() task.starting = true
+				pending[pending.count] = nil -- remove the task as will run soon
+				fiber.new(tt.tasks.Runner,task):name(task.handler)
+				pending.count = pending.count -1
+				fiber.yield() -- must yield after each task in case we have a big backlog
+			else -- else task.at <= wakeup; due before next wakeup
+				log.Debug("scheduler snoozing "..(task.at -now).." with "..pending.count.." tasks")
+				tt.tasks.wakeup = now -task.at
+				fiber.sleep(now -task.at)
+			end
+		end
+	end
+	function Task(task)
+		-- {at=timestamp, handler="ns.Function", async=false}; at=nil to run at next wakeup (tt.tasks.window); at=0 to run asap (after the next implict yield)
+		-- handlers receive the task table as their only argument; tasks are removed as they are run, if the task needs to repeat it may change task.at =time.at+interval or a new timestamp
+		-- handlers should use fiber.yield if carrying out multiple actions; handlers must not use sleep as this would sleep the scheduler itself, to sleep they should simply reschedule themselves
+		task.at = task.at or tt.tasks.wakeup or tt.now() -- will run first upon wakeup
+		log.Info("scheduling task "..task.handler.." in "..(task.at - tt.now()).." secs")
+		if pending.count ==0 or task.at < pending[pending.count].at then
+			pending[pending.count+1] = task
+		elseif task.at >= pending[1].at then
+			table.insert(pending,1,task)
+		else
+			for i=pending.count,1,-1 do
+				-- iterate backwards to find the position
+				if task.at > pending[i].at then table.insert(pending,i,task); break end
+			end
+		end
+		pending.count = pending.count +1
+		--box.space.tasks:insert(task)
+		if task.at < pending[pending.count].at then
+			-- need to run sooner
+			log.Debug("restarting scheduler")
+			tt.tasks.scheduler:cancel() -- stops at first yield following this call
+			tt.tasks.scheduler = fiber.new(tt.tasks.Scheduler)
+			tt.tasks.scheduler:name"scheduler"
+		end
+	end
+end
+
 print = box.session.push -- else goes to log, but in Moonstalk we use explict log functions
 
 cache = {}
@@ -36,10 +128,11 @@ do
 	local fiber_time = fiber.time -- usually gives 4 deciamls
 	local math_floor = math.floor
 	local now_tarantool = function(_,key) if key=="now" then return math_floor(fiber_time()) end end
-	_G.now = nil
-	setmetatable(_G,{__index=now_tarantool})
-	function now() -- more efficient than invoking _G.now via its metatable, and the only function that efficiently returns epoch time 
-		return math_floor(fiber_time())
+	_G.now = nil -- remove so its use fallsback to a metatable
+	setmetatable(_G,{__index=now_tarantool}) -- has no overhead as is only used when the lookup is nil, does have a minor overhead on values that can be nil as both tables must be checked, and the function invoked
+	function now() -- more efficient than invoking _G.now via its metatable
+		log.Debug() if node.environment ~="production" and tt.now_offset then return math_floor(fiber_time()) +tt.now_offset end -- debug feature
+		return math_floor(fiber_time()) -- the only function that efficiently returns epoch time but with decimals for milli precision which we don't want, mainly for direct timestamp equivalence between different envionrments, whereas comparison is no issue, and also for CreateID which needs second precision though could be optimised to call math.floor itself, nonetheless consistency is better
 	end
 end
 
@@ -79,7 +172,7 @@ function Enabler()
 	for _,bundle in pairs(moonstalk.applications) do
 		if bundle.files["tarantool.lua"] then
 			local result,imported = pcall(util.ImportLuaFile, bundle.path.."/tarantool.lua", bundle)
-			if not result then moonstalk.Error{bundle, title="Error loading Tarantool functions",detail=imported,class="lua"} end
+			if not result then moonstalk.Error{bundle, title="Error loading Tarantool functions",detail=imported,class="lua", level="Notice"} end
 		end
 	end
 end end
@@ -88,46 +181,7 @@ do local starter = tarantool.Starter -- preserve the original as we're replacing
 function Starter() -- replaces the default in functions
 	tarantool.started = os.time()
 	starter() -- run the original
-	--[=[ FIXME: TEST:
-	_G.task = {
-		pending={[0]={scheduled=999999999999999,default=true},count=0}, -- reverse order with lowest number last, so easy to remove and add new items to end for consumption; 0-position item is not sorted and remains as default
-	}
-	do
-	local scheduler -- the fiber
-	local window = 10 -- every x seconds to check for new tasks, any new tasks sooner involve killing the coroutine and recreating it to reschedule it, therefore in high demand environments this should be set as low as possible, e.g. 1
-	local pending = task.pending -- must be kept sorted with oldest (lowest numbered) at top
-	local scheduled = 0
-		function Scheduler()
-			local now,next
-			while true do
-				now = os.time()
-				next = pending[pending.count]
-				if next.scheduled >= now then
-					if not next.handler() then -- run the next task; must return true to preserve
-						pending[pending.count] = nil -- remove the task as completed
-						pending.count = pending.count -1
-					end
-					fiber.yield() -- must yield after each task in case we have a big backlog
-				elseif next.scheduled < now +window then
-					fiber.sleep(now - next.scheduled)
-				else
-					fiber.sleep(window)
-				end
-			end
-		end
-		function task.Schedule(event)
-			table.insert(pending,event)
-			util.SortArrayByKey(pending,"scheduled",true)
-			--box.space.tasks:insert(event)
-			if event.scheduled < next_event then
-				-- need to run sooner
-				scheduler:kill()
-				scheduler = fiber.create(Scheduler)
-			end
-		end
-	scheduler = fiber.create(Scheduler)
-	end
-	--]=]
+	tt.tasks.scheduler = fiber.new(tt.tasks.Scheduler)
 end end
 
 
@@ -246,7 +300,7 @@ function http.Request(request) -- FIXME: update to use new .handler and defer be
 	-- method is optional, default is GET or POST with json, body or urlencoded
 	-- all tarantool network operations are async with implict yields, however to support the explict behaviour in other environments we support the use of the async callback function, which will receive(response,err,request) thus the request table can be used to pass additional data; the additional defer=secs key-value may be sepcified however execution is not guarenteed if the server is restarted before this time has elapsed	-- TODO: support defer
 	-- response.json is a table if the response content-type is application/json
-	-- returns response,error -- NOTE: always use 'if err' not 'if not response' as the response object may nonetheless be returned with an error such as if it could not be decoded
+	-- returns response,response.error -- NOTE: always use 'if response.error'
 	-- if run async the calling function is responsible for handling errors, otherwise if logging >1 the error consumer can utilise request.sub (an array of all sub request and response tables) to inspect details
 	request.scheme,request.host,request.port,request.path = string.match(request.url,"^(.-)://([^:/]*):?([^/]*)(.*)")
 	request.path = request.path or "/"
@@ -268,10 +322,10 @@ function http.Request(request) -- FIXME: update to use new .handler and defer be
 	log.Info(request.method.." "..request.url)
 	log.Debug(request)
 	local response,err = client:request(request.method, request.url, request.body, {headers=request.headers, timeout=request.timeout}) -- https://tarantool.org/en/doc/1.7/reference/reference_lua/http.html
-	if err then log.Alert(err) return (request.async or sync_err)(nil,err) end
+	if err then response.error = err; log.Alert(err) return (request.async or sync_err)(nil,err) end
 	if response.headers['content-type'] =="application/json" then
 		response.json,err = json.decode(response.body)
-		if err then response._err = err; log.Alert(response); return (request.async or sync_err)(response,"JSON: "..err) end
+		if err then response.error = err; log.Alert(response); return (request.async or sync_err)(response,"JSON: "..err) end
 	end
 	if request and logging >1 then
 		-- keep a record in case there's a subsequent error
@@ -307,10 +361,12 @@ end
 end
 
 do local popen = require"popen" -- {package=false}; bundled
-function Shell(command,read)
-	local shell = popen(command.." 2>&1")
-	local result = shell:read(read or "*l")
+local stderr = {stderr=true}
+function Shell(command,options) -- does not support read limits/lines
+	local shell = popen.shell(command,"r")
+	local result,err = shell:read()
+	-- TODO: some kind of stderr detection
 	shell:close()
-	if result =="" then return end
+	if result=="" then return end
 	return result
 end end

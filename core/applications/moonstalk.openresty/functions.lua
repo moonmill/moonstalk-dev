@@ -91,6 +91,7 @@ end
 
 function Enabler()
 	-- replace default handlers -- FIXME: we need a better way to do this, perhaps a moonstalk.StartServer function that can be called before enablers which may need to use http and other handlers
+	scribe.editors[openresty.RemoveUploads] = "openresty.RemoveUploads"
 	scribe.Respond = Respond
 	scribe.GetPost = openresty.GetPost
 	http.Request = openresty.http_Request
@@ -131,6 +132,13 @@ function Starter()
 	util.Shell = openresty.Shell
 end end
 
+function RemoveUploads()
+	if not request.form or not request.form.files then log.Alert("BAD INVOCATION OF REMOVE UPLOADS with "..tostring(page.editors).." on "..tostring(_G.request)) end
+	for _,file in pairs(request.form.files) do
+		os.remove(file.temp)
+	end
+end
+
 local moonstalk_Resume = moonstalk.Resume
 do
 local reqargs = require"resty.reqargs" -- {package="lua-resty-reqargs"}
@@ -139,6 +147,8 @@ local ngx_req_read_body = ngx.req.read_body
 local ngx_req_get_body_data = ngx.req.get_body_data
 local util_MergeIf = util.MergeIf
 local pairs = pairs
+local openresty_RemoveUploads = openresty.RemoveUploads
+local scribe_PageEditor = scribe.PageEditor
 function GetPost() -- REFACTOR: shoud be type specific
 	-- transparently handles file buffering to disk, which can also be configured in nginx.conf per https://github.com/bungle/lua-resty-reqargs
 	-- check request.form._error or the second return argument
@@ -159,6 +169,7 @@ function GetPost() -- REFACTOR: shoud be type specific
 		if not get and form then return scribe.Error{realm="form",title="Multipart upload error: "..form} end -- nil,error -- TODO: option to not throw
 		request.form = form
 		if files then
+			scribe.PageEditor(openresty_RemoveUploads) -- nginx handles its own cleanup of nginx/client-uploads; files are only saved in uploads when this function is invoked thus we must enable cleanup of these in Moonstalk in case they are abandoned or not moved anywhere else
 			form.files = files
 			for key,item in pairs(files) do -- TODO: create a timer function/worker that removes these files when the request is done unless flagged file.remove=false
 				-- normalise; {field.name={name="original-filename.extension", file="path/to/temp/file"},…}
@@ -171,7 +182,6 @@ function GetPost() -- REFACTOR: shoud be type specific
 				end
 			end
 			page.editors = page.editors or {}
-			table.insert(page.editors, openresty.RemoveUploads)
 		end
 	elseif request.type =="application/json" then
 		moonstalk_Resume(ngx_req_read_body)
@@ -185,20 +195,6 @@ function GetPost() -- REFACTOR: shoud be type specific
 	end
 	return "form"
 end end
-
-function RemoveUploads()
-	log.Debug("removing uploaded files")
-	for _,file in pairs(request.form.files) do
-		os.remove(file.temp)
-	end
-end
-do
-	local scribe_AbandonedEditor = scribe.AbandonedEditor -- wrapping it ensures even in the case of an error we remove uploaded files
-	scribe.AbandonedEditor = function()
-		if request.form.files then openresty.RemoveUploads() end
-		scribe_AbandonedEditor()
-	end
-end
 
 do
 local concurrency = 0
@@ -260,7 +256,12 @@ function _Request()
 			-- ?foo&bar=baz = {foo=true,bar=baz}
 			request.query = ngx_req_get_uri_args(16) -- only parses arguments without values (no key=value) e.g. ?wibble+wobble or ?wibble&wobble-wubble as booleans (wibble==true)
 			for key,value in pairs(request.query) do
-				if value =="" then request.query[key] = nil end
+				if value =="" then request.query[key] = nil
+				elseif type(value) =='table' then -- ?key=value&key=value can contain empty values
+					for i=#value,1,-1 do
+						if value[i] =="" then table.remove(value,i) end
+					end
+				end
 			end
 			if request.query[ string_match(request.query_string, "[^%+=&]+") ] ==true then -- the query string contains a mix of + delimited and key-value attributes, openresty only parses the + delimited as booleans, however we preserve them in order as well; this test only parses as far as the first + & or = then looks up the value in the table thus is not unduly expensive, however query strings using this mixed attribute scheme are somewhat expensive as they invoke 3 functions calls and an iteration
 				local count = 0
@@ -324,7 +325,7 @@ local function sync_err(request) return request.response,request.response.error 
 function http_Request(request)
 	-- TODO: connection pooling, by default we assume a connection is not reusable
 	-- request = {url="http://host:port/path", method="GET", headers={Name="value"}, timeout=millis, json={…}, body=[[text]], urlencoded={…}, handler=namespace or function, defer=secs, ssl_verify=false}
-	-- returns response,error -- NOTE: do not use 'if not response', instead use 'if err' or 'if response.err' as a response table should be returned in all cases; HTTP status codes other than 2xx do not return an error parameter but do return response.error with the code; presence of response.error without response.code implies a localised error
+	-- returns response,response.error -- NOTE: do not use 'if not response'; HTTP status codes other than 2xx do not return an error parameter but do return response.error with the code; presence of response.error without response.code implies a localised error
 	-- response.json is a table if the response content-type is application/json
 	-- method is optional, default is GET, or POST when json, body or urlencoded are present in the request
 	-- defer=secs; =0 for immediate (guarenteed) decoupled execution; otherwise execution is not guarenteed without a persistence mechanism in place if the server is restarted before this time has elapsed; typically used with a handler, otherwise is silent; creation of a deferred request is not guaranteed even with persistence thus error handling should not differ
@@ -400,7 +401,7 @@ function http_New(request)
 		if err then response.error = "JSON: "..err; log.Alert(response); return (request._handler or sync_err)(request) end
 	end
 	if request.log ~=false then log.Info(response) end
-	if request._handler then request._handler(request) end -- contains request.response, no need to return as async
+	if request._handler then request._handler(response,request) end -- contains request.response, no need to return as async
 	return response
 end
 function http.Deferred(premature,request) -- TODO: this function should be replaced with one that can perform persistence, translating .defer to a time for resumption, and saving payloads to disk; upon persistence request._handler is discarded, and upon restoration restored by

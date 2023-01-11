@@ -69,18 +69,18 @@ In reality it does not update in real-time, but prior to a database query update
 -- NOTE: server is enabled by the Enabler as it depends upon role normalisation that is performed by it
 append({"tarantool.lua"},moonstalk.components)
 
-_G.tt = _G.tarantool -- sugar, e.g. tt.table_name:select() tt.enum.op.ADD
+_G.tt = _G.tarantool -- sugar, e.g. tt.table_name:select() enum.tt_op.ADD
 -- WARNING: client databases proxies are placed in this namespace, however they should all use plural names
 NULL = 0xC0 -- the raw pack byte which is not valid for use in the Tarantool server where it and msgpack.NULL are cdata with metamethods providing equality comparison with nil
+ERROR = '\21' -- cancel
 
 role = {} -- the tables for this node
 _roles = {} -- the count of tables for each role (not present for roles without tables)
 _tables = {}
 
 names_only = {names_only=true}
-enum = {}
-enum.op = {SET="=",ADD="+",SUBTRACT="-",AND="&",OR="|",XOR="^",SPLICE=":",INSERT="!",DELETE="#"} -- sugar -- NOTE: tarantool refers to SET as 'assign' -- TODO: use glosub to replace this with string ints in tarantool and lua files
-iter = {GT={iterator='GT'}, LT={iterator='LT'}, GE={iterator='GE'}, LE={iterator='LE'}, EQ={iterator='EQ'}, REQ={iterator='REQ'}} -- sugar; removing the need to keep creating tables, providing no other options are needed -- NOTE: EQ is the default therefore does not need to be declared in use
+enum.tt_op = {SET="=",ADD="+",SUBTRACT="-",AND="&",OR="|",XOR="^",SPLICE=":",INSERT="!",DELETE="#"} -- sugar -- NOTE: tarantool refers to SET as 'assign'
+iter = {GT={iterator='GT'}, LT={iterator='LT'}, GE={iterator='GE'}, LE={iterator='LE'}, REQ={iterator='REQ'}} -- sugar; avoids creating tables, providing no other options are needed -- NOTE: EQ is the default therefore does not need to be declared in use
 
 -- NOTE: the primary server startup invocation is at the end of this file, as we need to populate this environment first
 
@@ -108,6 +108,13 @@ function Enabler()
 				end
 				if host.roles[conf.role] then tarantool.role[conf.name] = conf end
 				conf.format = conf.format or {}
+				-- check for missing positions
+				local highest = 0
+				for position,name in pairs(conf) do -- iterate all keys that are numbers to find the highest index in case of a sparse array / missed tuple field sequence; cannot be combined with the foloowing iteration as that modifies the table during ipairs iteration
+					if type(position) =='number' and position > highest then highest = position end
+				end
+				if highest ~= #conf then return moonstalk.Error{tarantool, "invalid schema for "..conf.name, detail="empty tuple at index "..(#conf+1),level="Alert"} end
+				-- normalise
 				for position,name in ipairs(conf) do
 					if type(name) =='table' then
 						-- normalise to a list of field names, moving the table into a subtable
@@ -158,8 +165,138 @@ function Starter()
 end
 
 
--- # generic interfaces
+-- # abstractions
 
+function Serve(dbtable)
+	-- establish interfaces for both servers and schema tables used for making connections
+	-- server is optional and will inherit from node roles i.e. node.databases.role = {system="tarantool",host="",password=""}
+	-- may not be run from a request as does not use resume
+
+	-- configure the server
+	local server = tarantool[dbtable.role] -- may already exist
+	if not server then
+		server = dbtable.server
+		if not server then server = node.databases[dbtable.role] end -- use a configured node database server by role if available
+		if (not server or not server.host) and host.servers.tarantool and host.roles[dbtable.role] then
+			-- use the default localhost server
+			server = server or {}
+			server.host = "unix:"..moonstalk.root.."/temporary/tarantool/"..dbtable.role..".socket"
+			server.user = "moonstalk"
+			server.password = node.secret
+			server.role = dbtable.role
+		end
+		if not server.host then
+			return moonstalk.Error{tarantool, title="no server configured for '"..dbtable.role.."'"}
+		elseif tarantool[server.host] then
+			server = tarantool[server.host]
+		else
+			tarantool[dbtable.role] = server
+			server.call_semantics = "new"
+			server._spaces  = {}
+			server._indexes = {}
+			log.Debug("establishing connection to Tarantool instance "..dbtable.role.."@"..server.host)
+			server.socket_options = {pool_size=1,backlog=50} -- consumed by client and passed to socket.tcp:connect() -- FIXME: test it's unclear if this one connection can be shared between concurrent requests, but as any response esentially is sequential, we assume so
+			local result,err = tarantool.Connect(server) -- establishes the initial connection giving us first opportunity to check it
+			if result then log.Info("connected to Tarantool instance '"..dbtable.role.."'")
+			else moonstalk.Error{tarantool, title="cannot connect to '"..dbtable.role.."'", detail=err} end
+			result,err = request[server]:setkeepalive(0) -- keep the connection alive in pool with no timeout
+			if not result then moonstalk.Error{tarantool, title="cannot setkeepalive for '"..dbtable.role.."'", detail=err} end
+		end
+		copy(tarantool.methods, server) -- none of these are really actually needed but does provide ping
+		local mt = {}
+		mt.__call = server.call -- enables use of the server as the interface to Run, e.g. tarantool.role("app.function",parameters)
+		setmetatable(server, mt) -- currently we only enable tarantool client methods e.g. tarantool.client:upsert()
+	end
+
+	-- configure the table
+	if not tarantool[dbtable.name] then
+		local proxy = copy(server)
+		proxy.table = dbtable.name
+		copy(tarantool.methods, proxy)
+		tarantool[dbtable.name] = proxy
+	end
+end
+
+
+-- ## Schemas
+
+-- defines the database storage tables (Tarantool spaces) and data-structures (Tarantool tuples, Lua tables) with some application specific schema declaration and configuration utilities
+
+-- WARNING: do not save empty table values unless an array, if the table is a hash but is empty msgpack will always save it as an array, therefore empty hashes should instead be saved as nil and created on demand / when their first key is assigned
+-- WARNING: records (tuples) must always be terminated with a non-optional value otherwise setting values after a position having a nil value will fail; this can be avoided simply by converting records to a tuple using the model functions which automatically assign msgpack.NULL for missing fields
+
+-- NOTE: the default expectation with regard to tuples in spaces is that most fields will be consumed at once thus a single retreival operataion is most desireable; activities like paging through records are fairly low-intensisity and if larger values have to be decoded a few at a time this is inconsequential; however the meta fields are intended for use by applications and may thus grow significantly, their use must be restricted to only values that are likely to be consumed, or details of which applications are enabled for a particular record; in cases where the data is conditional (e.g. an application has a seperate view for a record) a seperate table/space should be used, retreived and merged as needed
+
+-- WARNING: when evaluting tuple fields directly (not converted with model), 'missing' (==msgpack.NULL) field values are actually cdata thus one MUST NOT use «if not tuple.field» as the field value always evaluates to true, one may however use «if tuple.field ==nil» as the equivalency test will fail (but invokes metamethods)
+-- WARNING: in the scribe msgpack.NULL==nil, therefore tables should not be converted to records in the scribe -- TODO: check this as tarantool's unpacker may create a sparse array
+
+
+-- # Utilities
+
+-- db.name functions should be used when creating new records as they ensure nils are not used; updating records should be done using enum references i.e. NAME.field for the positions -- TODO: an update abstraction akin to the Teller
+
+function Normalise(schema,record,fields,preserve)
+	-- converts a table from a record tuple to a keyed table, optionally only including the fields named in the fields array (which is efficient); or a record table into a tuple using the schema
+	-- if preserve = true when given a tuple will return a merged table but note that this cannot then be converted to a tuple by this function; this thus allows ephemeral keys to be added to this table that will be preserved
+	-- a table to be converted to a tuple must not contain a [1] key (i.e. an array part) though may contain other number keys
+	-- TODO: use tuple:tomap() if no fields are specified, though this uses NULL values
+	-- TODO: add debug mode validation checks because incorrect index values when inserting are hard to trace; possibly also add metatable to log the individual box.space calls
+	if record[1] then
+		-- convert tuple to record by iterating the field names and fetching the corresponding positions
+		-- use of tuple:tomap() in tarantool create a combined table, with table pointers to the cdata tuple values, but this table cannot be given to space:frommap()
+		local normalised
+		if not preserve then
+			normalised = {}
+		else -- combirecord (tuple and record in same table)
+			if moonstalk.server =="tarantool" then
+				-- we can't simply add fields to a tuple because it's cdata, so instead for the combi usage we still need a new table but we add a metatable with access to the tuple cdata fields; this unfortunately still means iterating all the fields -- OPTIMIZE: perhaps edit the tuple metatable to lookup key names on demand, this however would not work for conversion back to a tuple but we never do this(??) as updates are always partial
+				normalised = {}
+				local record = record
+				setmetatable(normalised,{__index=function(t,key) return record[key] end})
+			else
+				-- combi behaviour in the scribe simply reuses the tuple table which has been converted from cdata to a normal lua table before wire transmission
+				normalised = record
+			end
+			fields = nil
+		end
+		if not fields then
+			for position,name in ipairs(schema) do
+				normalised[name] = record[position]
+				if normalised[name] ==msgpack.NULL then normalised[name] = nil end
+			end
+		else
+			for _,name in ipairs(fields) do
+				normalised[name] = record[schema[name]]
+				if normalised[name] ==msgpack.NULL then normalised[name] = nil end
+			end
+		end
+		return normalised
+	else
+		-- convert record to tuple by iterating the field positions and assigning their values, including NULL where there is a subsequent value, thus trimming where there are no subsequent values
+		local tuple = {}
+		if preserve then tuple = record end
+		local name,populated,value
+		local schema = schema
+		local record = record
+		for position = schema.length,1,-1 do
+			name = schema[position]
+			value = record[schema[position]]
+			if not populated and value ~=nil then populated=true end -- any field hereon needs a value else the tuple could be sparse where fields are nil
+			if value ~=nil then
+				tuple[position] = value
+			elseif populated or schema.format[position].is_nullable ~=true then -- this last is not an optimised lookup as should be very infrequent
+				tuple[position] = msgpack.NULL
+			-- else there's no values nor required values this far into the tuple so leave empty
+			end
+		end
+		return tuple
+	end
+end
+
+
+-- # generic interfaces -- REFACTOR: -- FIXME: all the following are unused and out of date
+
+--[=[
 function Get(namespace,fieldset)
 	-- TODO: wraps the default iterface to provide response normalisation
 	local table,key = string_match(namespace,"([^%.]+)%.(.+)")
@@ -212,135 +349,11 @@ local function db_cache_get(_, fieldset)
 end
 end
 
-
--- # abstractions
-
-function Serve(dbtable)
-	-- establish interfaces for both servers and schema tables used for making connections
-	-- server is optional and will inherit from node roles i.e. node.databases.role = {system="tarantool",host="",password=""}
-	-- may not be run from a request as does not use resume
-
-	-- configure the server
-	local server = tarantool[dbtable.role] -- may already exist
-	if not server then
-		server = dbtable.server
-		if not server then server = node.databases[dbtable.role] end -- use a configured node database server by role if available
-		if (not server or not server.host) and host.servers.tarantool and host.roles[dbtable.role] then
-			-- use the default localhost server
-			server = server or {}
-			server.host = "unix:"..moonstalk.root.."/temporary/tarantool/"..dbtable.role..".socket"
-			server.user = "moonstalk"
-			server.password = node.secret
-			server.role = dbtable.role
-		end
-		if not server.host then
-			return moonstalk.Error{tarantool, title="no server configured for '"..dbtable.role.."'"}
-		elseif tarantool[server.host] then
-			server = tarantool[server.host]
-		else
-			tarantool[dbtable.role] = server
-			server.call_semantics = "new"
-			server._spaces  = {}
-			server._indexes = {}
-			log.Debug("establishing connection to Tarantool instance "..dbtable.role.."@"..server.host)
-			server.socket_options = {pool_size=1,backlog=50} -- consumed by client and passed to socket.tcp:connect() -- FIXME: test it's unclear if this one connection can be shared between concurrent requests, but as any response esentially is sequential, we assume so
-			local result,err = tarantool.Connect(server) -- establishes the initial connection pushing it into the request, and giving us first opportunity to check it
-			if result then log.Info("connected to Tarantool instance '"..dbtable.role.."'")
-			else moonstalk.Error{tarantool, title="cannot connect to '"..dbtable.role.."'", detail=err} end
-			result,err = request[server]:setkeepalive(0) -- keep the connection alive in pool with no timeout
-			if not result then moonstalk.Error{tarantool, title="cannot setkeepalive for '"..dbtable.role.."'", detail=err} end
-		end
-		copy(tarantool.methods, server) -- none of these are really actually needed but does provide ping
-		local mt = {}
-		mt.__call = server.call -- enables use of the server as the interface to Run, e.g. tarantool.role("app.function",parameters)
-		setmetatable(server, mt) -- currently we only enable tarantool client methods e.g. tarantool.client:upsert()
-	end
-
-	-- configure the table
-	if not tarantool[dbtable.name] then
-		local proxy = copy(server)
-		proxy.table = dbtable.name
-		copy(tarantool.methods, proxy)
-		tarantool[dbtable.name] = proxy
-	end
-end
-
-
--- ## Schemas
-
--- defines the database storage tables (Tarantool spaces) and data-structures (Tarantool tuples, Lua tables) with some application specific schema declaration and configuration utilities
-
--- WARNING: do not save empty table values unless an array, if the table is a hash but is empty msgpack will always save it as an array, therefore empty hashes should instead be saved as nil and created on demand / when their first key is assigned
--- WARNING: records (tuples) must always be terminated with a non-optional value otherwise setting values after a position having a nil value will fail; this can be avoided simply by converting records to a tuple using the model functions which automatically assign msgpack.NULL for missing fields
-
--- NOTE: the default expectation with regard to tuples in spaces is that most fields will be consumed at once thus a single retreival operataion is most desireable; activities like paging through records are fairly low-intensisity and if larger values have to be decoded a few at a time this is inconsequential; however the meta fields are intended for use by applications and may thus grow significantly, their use must be restricted to only values that are likely to be consumed, or details of which applications are enabled for a particular record; in cases where the data is conditional (e.g. an application has a seperate view for a record) a seperate table/space should be used, retreived and merged as needed
-
--- WARNING: when evaluting tuple fields directly (not converted with model), 'missing' (==msgpack.NULL) field values are actually cdata thus one MUST NOT use «if not tuple.field» as the field value always evaluates to true, one may however use «if tuple.field ==nil» as the equivalency test will fail (but invokes metamethods)
--- WARNING: in the scribe msgpack.NULL==nil, therefore tables should not be converted to records in the scribe -- TODO: check this as tarantool's unpacker may create a sparse array
-
-
--- # Utilities
-
--- db.name functions should be used when creating new records as they ensure nils are not used; updating records should be done using enum references i.e. NAME.field for the positions -- TODO: an update abstraction akin to the Teller
-
-function Normalise(schema,record,fields)
-	-- returns a new table converted from a record tuple to a keyed table, optionally only including the fields named in the fields array (which is efficient); or a keyed table into a tuple
-	-- if fields = true when given a tuple will return a merged table but note that this cannot then be converted to a tuple by this function; this thus allows ephemeral keys to be added to this table that will be preserved
-	-- record should not contain any array part
-	-- TODO: use tuple:tomap() if no fields are specified
-	-- TODO: add debug mode validation checks because incorrect index values when inserting are hard to trace; possibly also add metatable to log the individual box.space calls
-	if record[1] ~=nil or fields then
-		-- convert tuple to record by iterating the field names and fetching the corresponding positions
-		local normalised
-		if fields ==true then -- combirecord (tuple and record in same table)
-			if moonstalk.server =="tarantool" then
-				-- we can't simply add fields to a tuple because it's cdata, so instead for the combi usage we still need a new table but we add a metatable with access to the tuple cdata fields; this unfortunately still means iterating all the fields -- OPTIMIZE: perhaps edit the tuple metatable to lookup key names on demand, this however would not work for conversion back to a tuple but we never do this(??) as updates are always partial
-				normalised = {}
-				local record = record
-				setmetatable(normalised,{__index=function(t,key) return record[key] end})
-			else
-				-- combi behaviour in the scribe simply reuses the tuple table which has been converted from cdata to a normal lua table before wire transmission
-				normalised = record
-			end
-			fields = nil
-		else
-			normalised = {}
-		end
-		if not fields then
-			for position,name in ipairs(schema) do
-				normalised[name] = record[position]
-				if normalised[name] ==msgpack.NULL then normalised[name] = nil end
-			end
-		else
-			for _,name in ipairs(fields) do
-				normalised[name] = record[schema[name]]
-				if normalised[name] ==msgpack.NULL then normalised[name] = nil end
-			end
-		end
-		return normalised
-	else
-		-- convert record to tuple by iterating the field positions and assigning their values, including NULL where there is a subsequent value
-		local tuple = {}
-		local name,populated,value
-		local schema = schema
-		local record = record
-		for position = schema.length,1,-1 do
-			name = schema[position]
-			value = record[schema[position]]
-			if not populated and value ~=nil then populated=true end -- any field hereon needs a value else the tuple could be sparse where fields are nil
-			if value ~=nil then
-				tuple[position] = value
-			elseif populated or schema.format[position].is_nullable ~=true then -- this last is not an optimised lookup as should be very infrequent
-				tuple[position] = msgpack.NULL
-			-- else there's no values nor required values this far into the tuple so leave empty
-			end
-		end
-		return tuple
-	end
-end
+--]=]
 
 
 -- # finalise startup if we're the server
+
 if moonstalk.server =="tarantool" then
 	-- # enable the server
 	-- because tarantoolctl runs moonstalk as a server directly from temporary/tarantool/role.lua we must now convert that generic moonstalk server into a trantool server
