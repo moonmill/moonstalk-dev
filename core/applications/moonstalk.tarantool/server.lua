@@ -61,11 +61,11 @@ do
 	function tasks.Scheduler()
 		-- currently only supports a single task at a time
 		-- TODO: support resource limits and concurrent tasks (i.e. scheduling a new task if the current is waiting on async actions such as webservices or processes), allow them to run concurrently rather than getting stuck in a single task queue); tasks would thus need to indcate async=false if not cooperative, else indicate their resource usage, e.g. http=1, cpu=1
-log.Alert("sched starting")
+log.Notice("sched starting")
 		while true do
 			local now = tt.now()
-log.Alert("sched loop")
-	log.Alert{now,os.time()}
+log.Notice("sched loop")
+	log.Notice{now,os.time()}
 			local wakeup = now +tt.tasks.window
 			local task = pending[pending.count]
 			local sleep

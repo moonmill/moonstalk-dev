@@ -39,7 +39,7 @@ do
 local string_gsub = string.gsub
 local b64 = ngx.encode_base64
 local unb64 = ngx.decode_base64
-local aes = dofile "core/applications/moonstalk.openresty/include/aes.lua" -- TODO: inline the specific interface needed here
+local aes = dofile "core/applications/moonstalk.openresty/include/aes.lua" -- require "openresty/include/aes" -- {package=false} "resty.aes" bundle with: {package="lua-resty-string"} -- FIXME: don't use dofile, use the module include with string
 local cipher = aes:new(node.secret, nil, aes.cipher(256,"cbc"), {iv=string.sub(node.secret,-16)}) -- AES 256 CBC with IV and no SALT
 function util.Encrypt(value)
 	-- encrypt (aes-256-cbc); base64; substitutes chars (for URL safety)
@@ -318,7 +318,7 @@ end end
 
 do
 _G.http = _G.http or {}
-copy(require"resty/http",http) -- "openresty/include/http"
+copy(require"resty.http",http) -- {package="lua-resty-http"}
 local http = _G.http
 local log=log; -- required for async
 local function sync_err(request) return request.response,request.response.error end
