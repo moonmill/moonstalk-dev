@@ -306,6 +306,7 @@ function moonstalk.Error(bundle,error)
 	error.when = now
 	error.level = log.levels[error.level] or log.levels.Info
 	if not error.ready and error.level >log.levels.Info then bundle.ready = false end
+	if error.detail and type(error.detail) =='table' then error.detail = util.Serialise(detail) end
 	if error.class =="lua" and error.detail then
 		error.detail = string.gsub(error.detail,".-%[%w- \"(.*)","%1",1) or error.detail
 		error.detail = string.gsub(error.detail,"\"]:(%d)",":%1",1)
