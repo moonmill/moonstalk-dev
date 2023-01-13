@@ -241,7 +241,7 @@ function Request() -- request can be built in the server, typically by calling t
 	-- # Localisation
 	-- a locale is required by most applications; and is derived from request and user; but may be overridden in sites using localise=false
 	-- a language is required for collators to select localised page content (but should fallback to site default or first available)
-	log.Debug() if page.vocabulary and lfs.attributes(site.files[page.view..".vocab.lua"].path,"modification") > site.files[page.view..".vocab.lua"].imported then local view=site.views[page.view]; scribe.ImportViewVocabulary(site,view); page.vocabulary=view.vocabulary end -- as the vocabulary was already assigned from the address, in dev mode we must reassign it if changed
+	log.Debug() if page.view and page.vocabulary and lfs.attributes(site.files[page.view..".vocab.lua"].path,"modification") > site.files[page.view..".vocab.lua"].imported then local view=site.views[page.view]; scribe.ImportViewVocabulary(site,view); page.vocabulary=view.vocabulary end -- as the vocabulary was already assigned from the address, in dev mode we must reassign it if changed
 	local env_language = moonstalk_Environment(client, site, page)
 	page.language = page.language or env_language
 

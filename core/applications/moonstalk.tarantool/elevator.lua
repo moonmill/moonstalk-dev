@@ -32,7 +32,7 @@ local function Started(command,role)
 end
 
 elevator.functions.tarantool = function()
-	util.Shell(elevator.deprivelege"mkdir -p temporary/tarantool")
+	util.Shell(elevator.deprivelege"mkdir temporary/tarantool")
 	-- TODO: selectively restart just a changed tarantool process (database.role), not all of them
 	local enabled
 	for role in pairs(tarantool._roles) do

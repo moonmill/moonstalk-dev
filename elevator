@@ -684,7 +684,7 @@ end
 
 -- WARNING: on Ubuntu this may be auto-run on startup, where os.getenv does not appear to have any environment on 10.04; we therefore assume a default of rootuser if no value is available for user
 elevator.config.user = os.getenv 'USER'
-elevator.config.sudouser = os.getenv 'SUDO_USER'
+if not node.root then elevator.config.sudouser = os.getenv 'SUDO_USER' end -- it is possible (e.g. google compute) to use sudo su thus resulting in root operation as sudo, for which deprivelege may not be desired, thus node.root=true may be set to force root use without deprivelege
 -- are we running as root? required for some commands
 if elevator.config.sudouser or elevator.config.user=='root' or not elevator.config.user then
 	elevator.config.rootuser=true
