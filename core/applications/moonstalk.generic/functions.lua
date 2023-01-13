@@ -318,7 +318,7 @@ do if not http.New then
 		local response = {status=code, headers=headers, content=table.concat(sink)}
 		request.response = response -- introspection for request object which has been recorded in _G.request.subrequests
 		if not success then log.Alert(response) return nil,code end
-		if string.sub(response.headers['content-type'],1,16) =="application/json" then -- sometimes sent with ; charset=
+		if response.headers['content-type'] and string.sub(response.headers['content-type'],1,16) =="application/json" then -- sometimes sent with ; charset=
 			local err
 			response.json,err = json.decode(response.body)
 			if err then response._err = err; log.Alert(response); return nil,"JSON: "..err end
