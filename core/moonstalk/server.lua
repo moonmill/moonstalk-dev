@@ -306,7 +306,7 @@ function moonstalk.Error(bundle,error)
 	error.when = now
 	error.level = log.levels[error.level] or log.levels.Info
 	if not error.ready and error.level >log.levels.Info then bundle.ready = false end
-	if error.detail and type(error.detail) =='table' then error.detail = util.Serialise(detail) end
+	if error.detail and type(error.detail) =='table' then error.detail = util.SerialiseWith(detail,"rootcompact") end
 	if error.class =="lua" and error.detail then
 		error.detail = string.gsub(error.detail,".-%[%w- \"(.*)","%1",1) or error.detail
 		error.detail = string.gsub(error.detail,"\"]:(%d)",":%1",1)
@@ -1083,6 +1083,9 @@ moonstalk.AddLoader("lua",moonstalk.StripLogging,moonstalk)
 
 moonstalk.ignore_DirectoryFlattenedFiles = {["sites"]=true,["public"]=true,["assets"]=true,["static"]=true,["source"]=true,["development"]=true,["dev"]=true}
 -- the following is replaced by utilities-dependent and thus not actually used anywhere; in openresty this non-lfs version gets interrupted due to the use of :lines
+local string_sub = string.sub
+local string_gmatch = string.gmatch
+local string_match = string.match
 function moonstalk.DirectoryFlattenedFiles(path,ignore,cd,depth)
 	-- returns a table (of filenames) with all flattened files in the given directory path; use with pairs or table[filename] lookup; each file value is a table having both a file key and a path key (from moonstalk root) plus a type key if the file has an extension; do not use pairs to iterate; follows symbolic links
 	-- ignore is an additional table of keyed names that will not be traversed in the root

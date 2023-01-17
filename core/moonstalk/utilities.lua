@@ -1450,11 +1450,12 @@ format.html_simple = {
 format.html = copy(format.html_simple); format.html.newline = "<br>"; format.html.table_open="{<blockquote>"; format.html.table_close="</blockquote>}"
 format.root = copy(format.default); format.root.comma=""; format.root.table_open=""; format.root.table_close=""
 format.compact = copy(format.default); format.compact.indent=""; format.compact.linebreak=""; format.compact.newline=""
+format.rootcompact = copy(format.compact); format.root.table_open=""; format.root.table_close=""
 
 do local type=type
 do local _format = format.default
 function Serialise (object,maxdepth,lines,depth)
-	-- converts lua tables to serialised text; faster than PrettyCode but not as fast as proper serialisation routines such as cjson and luabins; outputs a somewhat hard to read compressed format unless lines is true, when a new line is output for each to-level key, slightly aiding reading; userdata and functions are effectively ignored, however their keys will appear with a value of nil to aid identification
+	-- converts lua tables to serialised text; faster than SerialiseWith but not as fast as proper serialisation routines such as cjson and luabins; outputs a somewhat hard to read compressed format unless lines is true, when a new line is output for each to-level key, slightly aiding reading; userdata and functions are effectively ignored, however their keys will appear with a value of nil to aid identification
 	-- safe to use for loading
 	-- depth parameter is internal
 	-- NOTE: values must never contain [=[ or ]=]

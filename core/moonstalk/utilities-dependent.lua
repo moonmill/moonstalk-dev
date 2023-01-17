@@ -1,8 +1,8 @@
 -- these functions are dependent upon modules that cannot be loaded by the elevator until they are installed, thus are maintained seperately and enabled by Initialise() in server which also loads the node table
 -- TODO: move to generic app
 
-_G.luabins = require "luabins"
 _G.posix_stdlib = require "posix.stdlib" -- {package="luaposix"}
+_G.luabins = require "luabins"
 _G.mime = require "mime" -- {package="mimetypes"}
 _G.socket = require "socket"
 _G.lfs = require "lfs" -- {package="luafilesystem"}
@@ -11,7 +11,7 @@ local string_match = string.match
 local string_gsub = string.gsub
 local string_sub = string.sub
 
-
+if lfs then
 function moonstalk.DirectoryFlattenedFiles(path,ignore,cd,depth)
 	-- see server.lua; this is an overload for use with lfs
 	-- also returns a modified timestamp for every file, plus a global modified timestamp as the second argument
@@ -62,6 +62,7 @@ function FileModified(path)
 	return lfs.attributes(path,"modification")
 end
 FileExists = FileModified
+end
 
 do
 	local result,uuid = pcall(require,"lua_uuid") -- {package=false}; optional

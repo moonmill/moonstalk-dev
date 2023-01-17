@@ -318,11 +318,15 @@ function http.Request(request) -- FIXME: update to use new .handler and defer be
 		request.headers['Content-Type'] ="application/json"
 		request.body =json.encode(request.json)
 	end
+	if request.ssl_verify ==false then
+		request.verify_host = 0
+		request.verify_peer = 0
+	end
 	request.method = request.method or "GET"
 	log.Info(request.method.." "..request.url)
 	log.Debug(request)
 	local response,err = client:request(request.method, request.url, request.body, {headers=request.headers, timeout=request.timeout}) -- https://tarantool.org/en/doc/1.7/reference/reference_lua/http.html
-	if err then response.error = err; log.Alert(err) return (request.async or sync_err)(nil,err) end
+	if err then request.error = err; log.Alert(err) return (request.async or sync_err)(nil,err) end
 	if response.headers['content-type'] =="application/json" then
 		response.json,err = json.decode(response.body)
 		if err then response.error = err; log.Alert(response); return (request.async or sync_err)(response,"JSON: "..err) end
