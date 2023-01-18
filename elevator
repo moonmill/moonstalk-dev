@@ -231,7 +231,7 @@ local function findmodule(name)
 		name[3] = string.match(name[1],'([^.]+)') -- to match posix.so from "posix.submodule"
 	end
 	for _,name in ipairs(name) do
-		for path in string.gmatch(moonstalk.path..";"..package.cpath..";","[^;]+") do -- TODO: support server envionrments such as opm and tarantool
+		for path in string.gmatch(moonstalk.path..";"..package.path..";"..package.cpath..";","[^;]+") do -- TODO: support server envionrments such as opm and tarantool
 			local path,matched = string.gsub(path,'%?',name)
 			if matched >0 then -- ignore paths without a filename replacement e.g. loadall.so
 				local file = io.open(path)
@@ -240,6 +240,7 @@ local function findmodule(name)
 		end
 	end
 end
+
 local function checkmodules(dir,directories)
 	if directories~=false then directories ="-R --include *.lua --exclude *test.lua --exclude-dir include --exclude-dir test " else directories ="" end -- don't examine files inside an directory named include
 	local shell = io.popen([[grep -H ]]..directories..[["require \?(\?\"" ]]..dir)
@@ -278,7 +279,6 @@ end
 local luarocks = os.execute("which luarocks > /dev/null") ==0
 -- we use moonstalk modules and apps, then modules installed in the system lua, and finally luarocks if installed but we have specific behaviours for this
 -- TODO: check if luarocks --version is > 3.8
-
 local config_title
 local function ConfigTitle()
 	if config_ttitle then return end

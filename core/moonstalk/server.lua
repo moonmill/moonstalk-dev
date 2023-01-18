@@ -520,7 +520,7 @@ function moonstalk.Shutdown()
 			if err then log.Alert(id..".Shutdown failed: "..err) end
 		end
 	end
-	log.Alert("Shutdown completed for "..moonstalk.server.." on "..node.hostname)
+	log.Alert("Shutdown")
 end
 
 -- # Resume
