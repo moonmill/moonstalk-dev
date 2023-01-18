@@ -68,7 +68,7 @@ local scribe_xpowered = "Moonstalk/".. node.version -- we do not reveal the actu
 local scribe_xmoonstalk = "" -- placeholder until after intialisation
 local EMPTY_TABLE = EMPTY_TABLE
 
-post = {maxsize=32000, ignore_methods=keyed{"GET","HEAD"}} -- all other methods with a body that exceeds a declared address.post.maxsize or scribe.post.maxsize (32KB) will be rejected
+post = {maxsize=32000, ignore_methods=keyed{"GET","HEAD","OPTIONS"}} -- all other methods with a body that exceeds a declared address.post.maxsize or scribe.post.maxsize (32KB) will be rejected
 local bodyless_methods = scribe.post.ignore_methods
 
 function Request() -- request can be built in the server, typically by calling the server's request generation function which returns it, but at this point has no access to other globals

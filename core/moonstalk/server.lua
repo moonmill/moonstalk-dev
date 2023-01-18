@@ -499,7 +499,7 @@ function moonstalk.EnableApplications(disable)
 				bundle.ready = false
 			end
 		end
-		log.Priority"Started"
+		log.Priority(moonstalk.server.." started")
 	end
 end
 
@@ -520,7 +520,7 @@ function moonstalk.Shutdown()
 			if err then log.Alert(id..".Shutdown failed: "..err) end
 		end
 	end
-	log.Alert("Shutdown")
+	log.Alert(moonstalk.server.." shutdown")
 end
 
 -- # Resume
