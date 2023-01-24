@@ -18,7 +18,7 @@ elseif request.headers.referer then
 	address,query = util.NormaliseUri(string.match(request.headers.referer, "//.-/([^?]+)(.*)"),{"/"}) -- we use the referrer to avoid polluting and adding overhead with the output of the initiating page on every request most of which will not invoke a translation
 	local translated_address = site.urns_exact[address]
 	if translated_address and translated_address.translated and translated_address.translated[language] then
-		address = address.translated[language]
+		address = translated_address.translated[language]
 	elseif request.query.fallback then
 		address = request.query.fallback
 	-- else will return to the original page which must thus have inline translations
