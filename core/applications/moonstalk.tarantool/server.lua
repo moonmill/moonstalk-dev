@@ -61,16 +61,12 @@ do
 	function tasks.Scheduler()
 		-- currently only supports a single task at a time
 		-- TODO: support resource limits and concurrent tasks (i.e. scheduling a new task if the current is waiting on async actions such as webservices or processes), allow them to run concurrently rather than getting stuck in a single task queue); tasks would thus need to indcate async=false if not cooperative, else indicate their resource usage, e.g. http=1, cpu=1
-log.Notice("sched starting")
 		while true do
 			local now = tt.now()
-log.Notice("sched loop")
-	log.Notice{now,os.time()}
 			local wakeup = now +tt.tasks.window
 			local task = pending[pending.count]
 			local sleep
 			if not task or task.at > wakeup then -- not due before next wakeup
-				log.Debug(ifthen(pending.count>0,"scheduler sleeping with "..pending.count.." tasks"))
 				tt.tasks.wakeup = wakeup
 				fiber.sleep(tt.tasks.window)
 			elseif task.at <= now then -- due
@@ -80,7 +76,6 @@ log.Notice("sched loop")
 				pending.count = pending.count -1
 				fiber.yield() -- must yield after each task in case we have a big backlog
 			else -- else task.at <= wakeup; due before next wakeup
-				log.Debug("scheduler snoozing "..(task.at -now).." with "..pending.count.." tasks")
 				tt.tasks.wakeup = now -task.at
 				fiber.sleep(now -task.at)
 			end
