@@ -469,10 +469,11 @@ function tag.ValidateTag(validation,reset)
 	local message
 	local class = defaults.valid -- default is valid
 	if validation.value==nil or reset then -- declared value takes precedence always
-		if temp.concordances then
-			local namespace = string_match(validation[1], "([^%[%.]*)")
-			validation.value = util_TablePath(temp.concordances, validation[1])
-		elseif request.get then
+		--if temp.concordances then
+		--	local namespace = string_match(validation[1], "([^%[%.]*)")
+		--	validation.value = util_TablePath(temp.concordances, validation[1])
+		--else
+		if request.get then
 			validation.value = validation[2]
 		elseif request.form[validation[1]] then -- post
 			validation.value = request.form[validation[1]]
@@ -1322,7 +1323,7 @@ function Editor ()
 		local page_js = page.javascript
 		page_js.flags = {}
 		if _G.page._validation then
-			local jsflags=page_js.flags; local copyfields=util.copyfields
+			local jsflags=page_js.flags; local copyfields=util.CopyFields
 			for _,validation in ipairs(_G.page._validation) do
 				local jsval =  copyfields(validation,nil,"1","validate","arg","optional","default","error","valid") -- we don't copy validated_class as we generally want the status to be updated from default
 				if jsvalidate[validation.validate] then copy(jsvalidate[validation.validate],jsval,true,false) end
