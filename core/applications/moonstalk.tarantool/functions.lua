@@ -241,7 +241,8 @@ function Normalise(schema,record,fields,preserve)
 	-- a table to be converted to a tuple must not contain a [1] key (i.e. an array part) though may contain other number keys
 	-- TODO: use tuple:tomap() if no fields are specified, though this uses NULL values
 	-- TODO: add debug mode validation checks because incorrect index values when inserting are hard to trace; possibly also add metatable to log the individual box.space calls
-	if record[1] then
+	if not record then return
+	elseif record[1] then
 		-- convert tuple to record by iterating the field names and fetching the corresponding positions
 		-- use of tuple:tomap() in tarantool create a combined table, with table pointers to the cdata tuple values, but this table cannot be given to space:frommap()
 		local normalised
