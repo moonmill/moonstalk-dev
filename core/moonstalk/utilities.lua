@@ -1322,6 +1322,29 @@ function Upper(text)
 	result[count] = string_sub(text,first)
 	return table.concat(result)
 end
+function Lower(text)
+	-- TODO: proper unicode
+	-- OPTIMIZE: just about okay for small strings not otherwise
+	local string_sub = string.sub
+	local result = {}
+	local count = 1
+	local last,first = 0,0
+	text = string.lower(text)
+	local transliteration_lower = terms.transliteration_lower
+	local unicode
+	for i=1,#text do
+		unicode = string_sub(text, i, i +1)
+		if transliteration_lower[unicode] then
+			result[count] = string_sub(text,first,i -1)
+			result[count+1] = transliteration_lower[unicode]
+			first = i +2
+			count = count +2
+		end
+	end
+	result[count] = string_sub(text,first)
+	return table.concat(result)
+end
+
 function Capitalise(text)
 	-- first uppercase, rest preserved
 	local first = string_sub(text,1,1)
@@ -2282,7 +2305,7 @@ function TablePathParent(within,path,assign)
 	if assign then within[parent or path] = assign end
 	return within
 end
-do local rawset; table_remove = table.remove
+do local rawset = rawset; table_remove = table.remove
 function TablePathAssign(within,namespace,assign,force, _ns_table,_ns_pos)
 	-- recurses the table given as within, creating missing tables and assigning the value
 	-- NOTE: if the value is nil, any missing parent tables within the namespace will not be created unles force = true
