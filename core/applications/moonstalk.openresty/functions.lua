@@ -102,6 +102,8 @@ function Enabler()
 		_G.smtp = require"resty.smtp" -- {package="resty-smtp"}
 		_G.mime = require"resty.smtp.mime" -- {package=false}
 		_G.ltn12 = require"resty.smtp.ltn12" -- {package=false}
+		smtp.Courier = email.smtp_Courier
+		smtp.Envelope = email.smtp_Envelope
 		email._Dispatch = email.Dispatch -- preserve so we can still use it
 		email.Dispatch = openresty.EmailDispatch -- replace with wrapped version that uses a coroutine or Resume
 		email.ResolveMX = openresty.ResolveMX
@@ -432,7 +434,7 @@ end
 
 function EmailDispatch(message)
 	-- wraps the default dispatch function to provide async handling through ngx.timer which removes the courier socket handling from the current page response flow, and also removes extra return parameters by using the wrapped timer.at function
-	if message.courier =="smtp" and not message.fail then message.fail = "email.Enqueue" end -- we use the default generic queue with a timer setup in Enabler
+	if message.courier =="smtp" and message.defer ~=false and not message.fail then message.fail = "email.Enqueue" end -- we use the default generic queue with a timer setup in Enabler
 	-- email._Dispatch is the original
 	if message.defer ==nil then
 		-- run in seperate coroutine so we don't wait to return response; uses wrapped timer function to suppress nginx's interrupt param; does not use Resume because it doesn't return to anything

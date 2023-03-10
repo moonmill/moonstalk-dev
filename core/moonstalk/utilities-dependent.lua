@@ -3,7 +3,7 @@
 
 _G.posix_stdlib = require "posix.stdlib" -- {package="luaposix"}
 _G.luabins = require "luabins"
-_G.mime = require "mime" -- {package="mimetypes"}
+_G.mime = _G.mime or require "mime" -- {package="mimetypes"}
 _G.socket = require "socket"
 _G.lfs = require "lfs" -- {package="luafilesystem"}
 

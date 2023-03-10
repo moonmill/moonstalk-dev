@@ -70,8 +70,8 @@ couriers = {}
 smtp_queue = util.Sync"data/smtp_queue.lua" or {} -- contains failed messages to retry with the Queue function
 
 require "socket" -- {package="luasocket"}
-_G.smtp = require "socket.smtp" -- {package=false}; included with luasocket
-_G.mime = require "mime" -- {package="mimetypes"}
+_G.smtp = _G.smtp or require "socket.smtp" -- {package=false}; included with luasocket
+_G.mime = _G.mime or require "mime" -- {package="mimetypes"}
 _G.ltn12 = require "ltn12" -- {package=false}; included with luasocket
 
 -- # globals
@@ -275,7 +275,11 @@ end
 
 function Failed(message)
 	-- NOTE: retrying=true with the first message.error; retrying=nil when backoff expires and the message is dropped
-	local app,handler = string.match(message.fail or "email.Dump", "(.-)%.(.+)")
+	if not message.fail then
+		log.Debug("unspecified message.fail")
+		return nil,"unspecified message.fail"
+	end
+	local app,handler = string.match(message.fail, "(.-)%.(.+)")
 	log.Debug() if not _G[app] or not _G[app][fail] then moonstalk.Error{email,title="Unknown message.fail",detail="handler ‘"..handler.."’ for message ‘"..message.subject.."’"}; return nil,"Unknown message.fail: "..message.fail end
 	local result,err = pcall(_G[app][fail],message)
 	if err then log.Notice(fail); message.error = "Error with fail handler '"..message.fail.."' on message '"..message.subject.."' "..err end
@@ -397,7 +401,7 @@ end
 -- # Default SMTP Courier
 -- couriers are provided by applications as application.Courier and each may have its own behavious beyond the normalised values provided by email.Send
 
-do local log=log; local util=util; local mime=mime; local smtp=smtp -- these are required when the courier is run async e.g. with ngx.timer
+do local log=log; local util=util; local smtp; local mime -- these are required when the courier is run async e.g. with ngx.timer
 local mx_cache = {} -- FIXME: needs a purge mechanism, perhaps simple use counter that just wipes it entirely
 function smtp_Courier (message)
 	-- if not using message.text and/or message.html we assume message.body is correctly prepared for use with this courier, which allows optimisations where the body is pre-rendered once for batch sends, instead of applying encodings on each send attempt, obviously this disallows swapping between couriers without also changing the body processing before Send is called
@@ -409,6 +413,7 @@ function smtp_Courier (message)
 	-- message.text or message.html may specify a message body for which the corresponding content-type will be set; if both text and html are declared the content-type is set to multipart-alternate
 	-- NOTE: if neither message.server or node.email.smtp.server then delivery is made without relay directly to the recipient domain's MX
 	-- in the case of an error, message.error and (if an SMTP error) message.status are added; message.errors is an additional table of recipients {email={error=message,status=code},…}; because a specified node/message.server is usually a relay, they will generally only fail once for all recipients (e.g. due authentication), and errors for individual recipients will result in delivery reports being forwarded to the sender by teh relay, it is however possible for an error status to be return in the middle of a multiple-recipient transaction in case a limit is reached or malformed data encountered, there is however no easy status recovery from this
+	mime = mime or _G.mime; smtp = smtp or _G.smtp -- unfortunate but apps may change it
 	local string_match = string.match; local table_insert = table.insert
 	if not message.headers.to and message.to then
 		local to = {}
@@ -503,7 +508,11 @@ function smtp_Courier (message)
 	else
 		log.Info("Sending '"..message.subject.."' to "..message.rcpt[1])
 		message.source = smtp.message(message)
+log.Debug(message)
+log.Debug"-----"
 		result,message.error = smtp.send(message) -- FIXME: how does this report individual errors with multiple recipients? resty-smtp apparently returns on the first failure
+		log.Debug(result)
+		log.Debug(message)
 		if not message.error then return true end
 		log.Debug("Send failed: "..message.error)
 		message.source = nil
