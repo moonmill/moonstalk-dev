@@ -152,8 +152,7 @@ function Elevator()
 end
 
 function Shutdown()
-	if not moonstalk.ready then return log.Notice"Shutting down without autosaving tables due to interrupted startup"
-	elseif databin.autosave ==false then
+	if databin.autosave ==false then -- TODO: table.safe=true to check the owning bundle.ready and not save if not ready; this would be used where startup functions modify the data
 		return log.Info"Autosaving tables is disabled"
 	elseif databin.managing ==0 then return end
 	local started = os.time()

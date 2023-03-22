@@ -305,7 +305,7 @@ function moonstalk.Error(bundle,error)
 	error.origin = error.origin or bundle.id
 	error.when = now
 	error.level = log.levels[error.level] or log.levels.Info
-	if not error.ready and error.level >log.levels.Info then bundle.ready = false end
+	if not moonstalk.started and not error.ready and error.level >log.levels.Info then bundle.ready = false end
 	if error.detail and type(error.detail) =='table' then error.detail = util.SerialiseWith(detail,"rootcompact") end
 	if error.class =="lua" and error.detail then
 		error.detail = string.gsub(error.detail,".-%[%w- \"(.*)","%1",1) or error.detail
@@ -560,6 +560,7 @@ function moonstalk.Resume(call,...)
 	for key=1,globals_count do key = moonstalk_globals[key]; _G[key] = preserve_env[key] end -- restore globals registered with moonstalk back to the persistent _G table table so that views and controllers may continue to use them
 	return a,b,c,d,e
 end
+
 function moonstalk.Initialise(options)
 	-- options.applications=false defers loading
 	-- options.ready=false should be used in client apps (named as a server) to silence their started status and finalisers, or in servers which carry out additional long running startup routines before they manually run finalisers and log.Priority"Started"
@@ -572,7 +573,6 @@ function moonstalk.Initialise(options)
 
 	_G.now = os.time()
 	moonstalk.instance = options.instance or moonstalk.instance
-	moonstalk.started = now
 	moonstalk.initialise = options
 	moonstalk.server = options.server
 	local bundle,err = util.ImportLuaFile("moonstalk/utilities-dependent", util) -- modules now available so we'll add the dependent functions to util
@@ -871,6 +871,8 @@ function moonstalk.Initialise(options)
 	end
 	setmetatable(_G.enum,nil)
 	keyed(moonstalk.files)
+
+	moonstalk.started = now
 end
 end
 
