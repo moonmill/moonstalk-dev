@@ -296,8 +296,9 @@ end
 function moonstalk.Error(bundle,error)
 	-- (string) or (bundle,string) or or {bundle,level="Alert",title=string,origin=bundle.id,global=false…} where all are optional except title
 	-- TODO: err.name to prevent duplicates, typically a simple name, else title is used; if matched then simply the count and last occurance is updated, with the timestamp added to an array; if the error is not identical it is not linked
-	-- ready=true to not change bundle ready state
+	-- ready=true to not change bundle ready state during startup
 	-- bundle can be any table havign an errors table, such as a site, but in this case err.realm="site" to prevent propogation to the global moonstalk errors -- REFACTOR: use global=false instead of realm="site"
+	-- error.ref will result in errors with identical titles and descriptions being aggregrated, with error.refs[ref]=time
 	if not error then error = bundle; bundle = nil end
 	if type(error) =='string' then error = {title=error} end
 	if error[1] then bundle = error[1]; error[1] = nil end
@@ -311,10 +312,22 @@ function moonstalk.Error(bundle,error)
 		error.detail = string.gsub(error.detail,".-%[%w- \"(.*)","%1",1) or error.detail
 		error.detail = string.gsub(error.detail,"\"]:(%d)",":%1",1)
 	end
-	if error.level >= log.levels.Notice then
+	if error.level <= log.levels.Notice then -- do not store Debug, Append, Info
 		if bundle ~=moonstalk and (not error.id or not bundle.errors[error.id]) then
 			bundle.errors.significance = bundle.errors.significance or 10 -- should be inherited from default application but isn't
 			if error.level < bundle.errors.significance then bundle.errors.significance = error.level end
+			-- check for dups and increment
+			for _,checkerr in ipairs(bundle.errors) do
+				if error.title ==checkerr.title and error.detail ==checkerr.detail then
+					checkerr.count = (checkerr.count or 0) +1
+					checkerr.when = now
+					if error.ref then
+						error.refs = error.refs or {}
+						checkerr.refs[error.ref] = checkerr.when
+					end
+					return nil,error.title
+				end
+			end
 			table.insert(bundle.errors,error)
 			if error.id then bundle.errors[error.id] = error end
 		end
@@ -572,6 +585,7 @@ function moonstalk.Initialise(options)
 	-- options.async = false; single-threaded servers without native coroutine yielding for blocking operations -- TODO: use in loader to strip calls to moonstalk.Resume
 
 	_G.now = os.time()
+	moonstalk.started = false -- in progress
 	moonstalk.instance = options.instance or moonstalk.instance
 	moonstalk.initialise = options
 	moonstalk.server = options.server
@@ -995,12 +1009,12 @@ function moonstalk.Environment(client, tenant, content)
 		vocab3 = unpopulated
 	elseif not content or not content.vocabulary then
 		language = client.language or tenant.language
-		vocab1 = tenant.vocabulary[language]
+		vocab1 = tenant.vocabulary[language] or unpopulated
 		vocab2 = vocabulary[language]
 		vocab3 = unpopulated
 	else
 		language = content.language or client.language or tenant.language
-		vocab1 = content.vocabulary[language]
+		vocab1 = content.vocabulary[language] or unpopulated
 		vocab2 = tenant.vocabulary[language]
 		vocab3 = vocabulary[language]
 	end
@@ -1033,7 +1047,7 @@ end
 function moonstalk.ImportVocabulary(bundle) -- TODO: invoke on file change; remove hack from loadview
 	-- unlike settings, vocabularies have no access to the global environment
 	if not bundle.files["vocabulary.lua"] then return end
-	bundle.polyglot = true
+	bundle.polyglot = bundle.polyglot or true
 	bundle.vocabulary = bundle.vocabulary or {}
 	log.Debug("  vocabulary")
 	bundle.files["vocabulary.lua"].imported = now

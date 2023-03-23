@@ -220,9 +220,9 @@ function Request() -- request can be built in the server, typically by calling t
 		elseif site.polyglot and request.headers['accept-language'] then
 			page.state = 5
 			local client = request.client
-			for lang_locale,language,locale in string_gmatch(string_lower( request.headers['accept-language'] ),"[q%A]*((%a*)%-?(%a*))") do
+			for lang_locale,language,locale in string_gmatch(string_lower( request.headers['accept-language'] ),"[q%A]*((%a*)%-?(%a*))") do -- FIXME: can be a table
 				if language =="" then break
-				elseif site.vocabulary[language] then -- this is built from translated views, and the site's own vocabulary, so must define languages that shall be supported for matching with a client; client.language will thus never be an unsupported value and cannot be used for profiling
+				elseif site.polyglot and site.polyglot[language] then -- FIXME: site.vocabulary currently has all languages in it for soem reason!! -- this is built from translated views, and the site's own vocabulary, so must define languages that shall be supported for matching with a client; client.language will thus never be an unsupported value and cannot be used for profiling
 					client.language = language
 					if locale and locales[lang_locale_match] then
 						client.locale = lang_locale_match
@@ -789,7 +789,7 @@ function Sites()
 	site.path = "/dev/null"
 	site.robots = "none"
 	site.addresses = {
-		{ matches="front", redirect="Manager"},
+		-- { matches="front", redirect="Manager"},
 		{ matches="installed", view="generic/admin-installed"},
 	}
 	return{site}
@@ -815,6 +815,7 @@ function Site(site)
 		site.secure = nil
 		bundle.Error(site,"Cannot secure an unsecured site; certificate missing")
 	end
+	if site.vocabulary and site.vocabulary.mt then log.Alert(00000000) end
 
 	scribe.ConfigureBundle(site,"sites")
 
@@ -1552,7 +1553,7 @@ function ConfigureBundle(bundle,kind)
 						if not result then moonstalk.BundleError(bundle,{realm="bundle",title="Error loading file "..file.file,detail=msg}) end
 					end
 					if site.files[file.id..".vocab.lua"] then
-						site.polyglot = true
+						site.polyglot = site.polyglot or true
 						file.ployglot = true
 						scribe.ImportViewVocabulary(site,bundle.views[file.id])
 					end
