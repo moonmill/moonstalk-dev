@@ -222,7 +222,7 @@ function Request() -- request can be built in the server, typically by calling t
 			local client = request.client
 			for lang_locale,language,locale in string_gmatch(string_lower( request.headers['accept-language'] ),"[q%A]*((%a*)%-?(%a*))") do -- FIXME: can be a table
 				if language =="" then break
-				elseif site.polyglot and site.polyglot[language] then -- FIXME: site.vocabulary currently has all languages in it for soem reason!! -- this is built from translated views, and the site's own vocabulary, so must define languages that shall be supported for matching with a client; client.language will thus never be an unsupported value and cannot be used for profiling
+				elseif site.polyglot==true or site.polyglot[language] then -- FIXME: site.vocabulary currently has all languages in it for soem reason!! -- this is built from translated views, and the site's own vocabulary, so must define languages that shall be supported for matching with a client; client.language will thus never be an unsupported value and cannot be used for profiling
 					client.language = language
 					if locale and locales[lang_locale_match] then
 						client.locale = lang_locale_match
