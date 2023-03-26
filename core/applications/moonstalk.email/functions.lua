@@ -508,8 +508,6 @@ function smtp_Courier (message)
 	else
 		log.Info("Sending '"..message.subject.."' to "..message.rcpt[1])
 		message.source = smtp.message(message)
-log.Debug(message)
-log.Debug"-----"
 		result,message.error = smtp.send(message) -- FIXME: how does this report individual errors with multiple recipients? resty-smtp apparently returns on the first failure
 		log.Debug(result)
 		log.Debug(message)

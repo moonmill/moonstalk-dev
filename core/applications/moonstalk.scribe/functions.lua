@@ -125,7 +125,7 @@ function Request() -- request can be built in the server, typically by calling t
 	-- # Routing etc : Map the view/controller
 	page.state = 2
 	for _,Collator in ipairs(page.collate or site.collate) do -- NOTE: if a curator wishes to prevent collation then it may set page.collate = {}
-		if Collator() then page.collate = true; break end
+		if Collator(page) then page.collate = true; break end
 		-- typically used to retreive and populate data, notably the page; must explictly return true to prevent any following collators from running (such as for default not found page handler); may also act upon globals such as user, and retreive and set static page content by calling write(content), set page.controller or page.view etc; should identify and populate user and preferences, with scribe.Token() and SetSession() as appropriate
 		-- may also be set by the Curator/Binder site.collate={Function, …}; or page.collate={} for sites or pages that do not need collation
 	end
@@ -490,9 +490,7 @@ end
 -- the following all return false so that one can use return NotFound() in a controller and thus prevent the view from running
 function Redirect(url,code)
 	if page.error then return end -- preserve errors
-	local cookies = page.cookies -- needs to preserve for redirect as abandon discards them
 	scribe.Abandon(code or 302)
-	_G.page.cookies = cookies
 	_G.page.headers["Location"] = url
 	log.Debug("redirecting to "..url)
 	_G.output = {[[<a href="]],url,[[">Redirected to ]],url,[[</a>]],}
@@ -850,9 +848,9 @@ function Site(site)
 			domain.redirect = false
 		end
 		if domain.name ~=site.domain and domain.redirect ~=false and site.redirect ~=false then
-			local redirect_append = domain.redirect_append ==true
-			if not redirect_append and site.redirect_append ==true then redirect_append = true end
-			moonstalk.domains[domain.name] = {urns_exact={},language=node.language, controllers=moonstalk.applications.generic.controllers, views=moonstalk.applications.generic.views, errors={}, urns_patterns={{pattern=".", collate={scribe.RedirectCollator}, redirect= domain.redirect or site.redirect or ifthen(site.secure,"https://"..site.domain,"http://"..site.domain), redirect_append=redirect_append}}} -- a bit convoluted, compared simply an «if site.redirect» in the Request handler however sites that redirect should be rarely used and keeps the Request handler cleaner -- we need urns_exact as binder will evaluate it before attempting the patterns, and we also need language for establishing the page envionrment and controllers for the actual handling
+			local path_append = domain.path_append
+			if path_append ==nil then path_append = site.path_append end
+			moonstalk.domains[domain.name] = {urns_exact={},language=node.language, controllers=moonstalk.applications.generic.controllers, views=moonstalk.applications.generic.views, errors={}, urns_patterns={{pattern=".", collate={scribe.RedirectCollator}, redirect= domain.redirect or site.redirect or ifthen(site.secure,"https://"..site.domain,"http://"..site.domain), path_append=path_append, redirect_from=site}}} -- a bit convoluted, compared simply an «if site.redirect» in the Request handler however sites that redirect should be rarely used and keeps the Request handler cleaner -- we need urns_exact as binder will evaluate it before attempting the patterns, and we also need language for establishing the page envionrment and controllers for the actual handling
 		elseif node.environment ~="production" or not domain.staging then -- only add staging domains on non-production nodes to prevent access to staging features
 			moonstalk.domains[domain.name] = site -- pointer
 		end
@@ -1010,12 +1008,15 @@ end end
 do local empty_urn = {}
 function RedirectCollator(from)
 	-- both site and addresses may specify redirects; site is handled with a pseudo-site table using this as its curator
-	-- if the site specifies redirect_appaend=true then the requested path will be appended, the target URL should therefore end with / or ?
-	from = from or site
+	-- if the address or site specifies path_append="(.+)" with a lua string.match capture to be applied to the path, this will be appened to the target redirect URL, which should therefore end with / or ?
+	-- if the address or site specifies query_preserve=true then this will be appened including ?
+	from = site.redirect_from or from -- use the page unless for pseudo site globally redirected
 	local to = from.redirect
-	if from.redirect_append then to = to .. from.address end
-	if request.query_string then to = to..request.query_string end
-	scribe.Redirect(to)
+	if from.path_append then to = to .. (string.match(request.path,from.path_append) or "") end
+	if request.query_preserve then to = to.."?"..request.query_string end
+	_G.page.headers["Location"] = to
+	log.Debug("redirecting to "..to)
+	_G.output = {[[<a href="]],to,[[">Redirected to ]],to,[[</a>]],}
 	return true
 end end
 
@@ -1097,6 +1098,7 @@ function _Abandon(to)
 	-- site template must be capable of running without its controller (i.e. only references the root of page.temp)
 	-- assumes the view uses a template -- TODO: check view.template
 	-- site.editors are preserved and should not therefore make assumptions about the valid state of a page, output should however be valid for manipulation
+	-- does not reset cookies, these will still be set
 	-- TODO: (low) an error before the end of a view's output that does not return/is not caught results in additional output that should be dropped; only applies to non top-level pcall use
 	to = to or "generic/error"
 	log.Info("Abandoning to "..to.." from "..(page.address or request.path))
@@ -1109,7 +1111,6 @@ function _Abandon(to)
 	page.view = false
 	page.controller = false
 	page.template = false
-	page.cookies = false
 	page.status = 500 -- default, the given page may override
 	if type(to) =='number' then
 		-- no need to render content
@@ -1582,7 +1583,7 @@ function ConfigureBundle(bundle,kind)
 		local invalid
 		-- urn.scope = "branch" -- pointer to the app/site for introspection
 		-- convert convience syntax for redirects to full spec (i.e. with a controller)
-		if urn.redirect then urn.controller = "generic/redirect" end -- more expensive than including handling in the default collator but should be infrequently used
+		if urn.redirect then urn.collate = scribe.RedirectCollator end
 		if bundle.secure and urn.secure ==nil then urn.secure = true end -- propogate bundle setting to urn
 		urn.postmark = bundle.id -- allows identification of an address source per-request
 		if urn.authenticator ~=false then urn.Authenticator = scribe.GetTablePath(urn.authenticator) end

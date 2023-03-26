@@ -323,6 +323,7 @@ function moonstalk.Error(bundle,error)
 					checkerr.when = now
 					if error.ref then
 						error.refs = error.refs or {}
+						checkerr.refs = checkerr.refs or {}
 						checkerr.refs[error.ref] = checkerr.when
 					end
 					return nil,error.title
