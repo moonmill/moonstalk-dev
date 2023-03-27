@@ -130,7 +130,7 @@ function Request() -- request can be built in the server, typically by calling t
 		-- typically used to retreive and populate data, notably the page; must explictly return true to prevent any following collators from running (such as for default not found page handler); may also act upon globals such as user, and retreive and set static page content by calling write(content), set page.controller or page.view etc; should identify and populate user and preferences, with scribe.Token() and SetSession() as appropriate
 		-- may also be set by the Curator/Binder site.collate={Function, …}; or page.collate={} for sites or pages that do not need collation
 	end
-log.Debug(site.urns_exact)
+
 	if not page.collated then
 		page.view = "generic/not-found"
 		request.form = EMPTY_TABLE
