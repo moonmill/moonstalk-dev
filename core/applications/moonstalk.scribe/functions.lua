@@ -491,11 +491,11 @@ end
 
 -- the following all return false so that one can use return NotFound() in a controller and thus prevent the view from running
 function Redirect(url,code)
+	-- return scribe.Redirect to prevent or interrupt remaining view collation
 	if page.error then return end -- preserve errors
 	scribe.Abandon(code or 302)
 	_G.page.headers["Location"] = url
 	log.Debug("redirecting to "..url)
-	_G.output = {[[<a href="]],url,[[">Redirected to ]],url,[[</a>]],}
 	return false
 end
 function RedirectSecure(address,code)
@@ -1027,6 +1027,7 @@ function RedirectCollator(from)
 	-- for sites is invoked from site.collate using Request; for address redirects site.collate must be invoked to populate the page with the address and thus inherited redirect, which adds controller="generi.redirect" to invoke this function with from=page, this is a bit more expensive than having handling in the collator itself, however this function does not invoke Abandon
 	-- if the address or site specifies path_append="(.+)" with a lua string.match capture to be applied to the path, this will be appened to the target redirect URL, which should therefore end with / or ?
 	-- if the address or site specifies query_preserve=true then this will be appened including ?
+	log.Debug"RedirectCollator"
 	from = from or site -- use the page unless for pseudo site globally redirected
 	local to = from.redirect
 	if from.path_append then to = to .. (string.match(request.path,from.path_append) or "") end
@@ -1067,6 +1068,7 @@ end
 -- the following Abandon functions implement a simplified controller-view-template mechanism that is invoked as an editor, run either with continuation in the Request handler after setting all incompleted state functions to false, or may be called after being thrown with assert
 function Abandon() end -- placeholder during intialisation
 do local function RenderAbandon(name,object)
+	log.Debug"RenderAbandon"
 	if not object then
 		scribe.Error("Couldn't abandon to missing view "..(name or "unknown"))
 		return false
@@ -1131,10 +1133,11 @@ function _Abandon(to)
 	page.view = false
 	page.controller = false
 	page.template = false
-	page.status = 500 -- default, the given page may override
+	page.status = 500 -- default, the given page may override if status is not explictly passed
 	if type(to) =='number' then
 		-- no need to render content
 		page.status = to
+		page.type = nil
 		page.editors = false
 		return
 	end

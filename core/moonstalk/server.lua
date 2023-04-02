@@ -322,7 +322,6 @@ function moonstalk.Error(bundle,error)
 					checkerr.count = (checkerr.count or 0) +1
 					checkerr.when = now
 					if error.ref then
-						error.refs = error.refs or {}
 						checkerr.refs = checkerr.refs or {}
 						checkerr.refs[error.ref] = checkerr.when
 					end
@@ -331,6 +330,11 @@ function moonstalk.Error(bundle,error)
 			end
 			table.insert(bundle.errors,error)
 			if error.id then bundle.errors[error.id] = error end
+		end
+		if error.ref then
+			error.refs = {}
+			error.refs[error.ref] = now
+			error.ref = nil
 		end
 		if error.global ~=false and (not error.id or not moonstalk.errors[error.id]) then
 			if error.level < moonstalk.errors.significance then moonstalk.errors.significance = error.level end

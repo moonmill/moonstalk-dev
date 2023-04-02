@@ -37,14 +37,14 @@ function log.Open(file)
 	log.Append = log.WriteLog; Append = log.WriteLog
 end
 
-function log.Debug (msg)  if level > 3 then Append(msg," [ ] ") end end
-function log.Info (msg)   if level > 2 then Append(msg," [i] ") end end
-function log.Notice (msg) if level > 1 then Append(msg," [★] "); return nil,msg end end
-function log.Alert (msg)  if level > 0 then Append(msg," [‼︎] "); return nil,msg end end
-function log.Priority (msg)
-	if node.production and node.admin then email.Send{to=node.admin,subject="Moonstalk critical message",body="on instance "..node.instance.." of "..node.server.." at "..node.hostname.."\n\n"..msg} end
-	Append(msg," [✻] ")
-	return nil,msg
+function log.Debug (msg,err)  if level > 3 then Append(msg or err," [ ] ") end end
+function log.Info (msg,err)   if level > 2 then Append(msg or err," [i] ") end end
+function log.Notice (msg,err) if level > 1 then Append(msg or err," [★] "); return nil,msg or err end end
+function log.Alert (msg,err)  if level > 0 then Append(msg or err," [‼︎] "); return nil,msg or err end end
+function log.Priority (msg,err)
+	if node.production and node.admin then email.Send{to=node.admin,subject="Moonstalk critical message",body="on instance "..node.instance.." of "..node.server.." at "..node.hostname.."\n\n"..(msg or err)} end
+	Append(msg or err," [✻] ")
+	return nil,msg or err
 end
 
 -- TODO: cache notices and push to disk at intervals (does lighty already do this?) to reduce disk use for per-request accountancy logging; check if lighty already does this, in which case lighty logging can be used for accountancy
