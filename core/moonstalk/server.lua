@@ -296,9 +296,10 @@ end
 function moonstalk.Error(bundle,error)
 	-- (string) or (bundle,string) or or {bundle,level="Alert",title=string,origin=bundle.id,global=false…} where all are optional except title
 	-- TODO: err.name to prevent duplicates, typically a simple name, else title is used; if matched then simply the count and last occurance is updated, with the timestamp added to an array; if the error is not identical it is not linked
-	-- ready=true to not change bundle ready state during startup
 	-- bundle can be any table havign an errors table, such as a site, but in this case err.realm="site" to prevent propogation to the global moonstalk errors -- REFACTOR: use global=false instead of realm="site"
-	-- error.ref will result in errors with identical titles and descriptions being aggregrated, with error.refs[ref]=time
+	-- error.ready=true to not change bundle ready state during startup
+	-- error.public=true will show the error.detail, otherwise only the title
+	-- error.ref="identifier" will result in errors with identical titles and descriptions being aggregrated, where error.refs[ref]=time; this also permits apps that propagate errors to dedup with a time threshold
 	if not error then error = bundle; bundle = nil end
 	if type(error) =='string' then error = {title=error} end
 	if error[1] then bundle = error[1]; error[1] = nil end
@@ -941,7 +942,7 @@ end
 function util.IDFromDate(date)
 	-- converts a date timestamp to a pseudo-ID that can be used for date-comparison with IDs from CreateID
 	-- NOTE: can only be used for > or < comparisons to a resolution of seconds; cannot be used for date equality comparison as for any given date and ID with the same timestamps, the ID will always have a randomly greater value
-	return os.date("%y%m%d",date)..continuum.placeholder
+	return date..continuum.placeholder
 end
 local string_sub = string.sub
 local tonumber = tonumber

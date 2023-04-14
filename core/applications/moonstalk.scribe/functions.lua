@@ -121,7 +121,7 @@ function Request() -- request can be built in the server, typically by calling t
 		-- we don't handle the scenario of a missing site, as the generic application adds a final curator to handle that
 	end
 	_G.site = site
-	log.Info() if node.environment ~="production" and site.domains[request.domain] and site.domains[request.domain].staging then site.domain = request.domain end -- ensures staging domains are used in place of the default; must check if domain is defined as wildcard domains will not and can not be used for staging; only enabled with high log level thus typically not on production servers
+	log.Info() if node.environment ~="production" and site.domains[request.domain] and site.domains[request.domain].staging then site.domain = request.domain end -- DEV FEATURE ensures staging domains are used in place of the default; must check if domain is defined as wildcard domains will not and can not be used for staging; only enabled with high log level thus typically not on production servers
 
 	-- # Routing etc : Map the view/controller
 	page.state = 2
@@ -341,8 +341,9 @@ function ControllerSandbox(path,env)
 end
 
 function View(path)
-	-- creation of shared fragments may be done simply by declaring a function in a suitable namespace to wrap output, such as a local in any view; or with a functions.html file -- NOTE: such functions write to output and return nothing thus must use <? code ?> tags not ?(marco) markup
-	-- cannot currently ask for a view with a specific translation without changing the request.client.language
+	-- creation of shared fragments may be done simply by declaring a function in a suitable namespace to wrap output, such as a local in any view; or with a functions.html file -- NOTE: such functions write to output and return nothing thus must use <? code ?> tags not ?(macro) markup
+	-- cannot currently get a view with a specific translation without changing page.language
+	-- NOTE: view vocabularies only function with views when the view is a page's primary (i.e. has been associated with an address); secondary views included with scribe.View should defined default terms in the global vocabulary, and the primary view may use overrides on these terms to customse a shared view to its own use
 	local view = site.views[path]
 	log.Debug() if not view then return scribe.Error{realm="page",title="Missing view",detail=path} end
 	page.type = view.type
@@ -1163,10 +1164,14 @@ end
 function Error(err)
 	-- cancels server processing to show an error page
 	-- proagation to other services can be handled by wrapping this function
+	-- err.public=true if the detail is to be shown in the response instead of hidden (unless dev); in the case of the generic error page
+	-- err.level=false if the error has already been reported and this function should only propagate as a response page, not to moonstalk.Errror
 	if type(err) ~="table" then err = {scribe, title=tostring(err)}
 	elseif not err[1] then err[1] = scribe end
-	-- TODO: aggregrate into bundle errors as per moonstalk.error, or delegate
-	log[err.level or 'Info'](table.concat({err[1].id, err.title or "",err.detail}," | "))
+	if err.level ~=false then
+		-- TODO: aggregrate into bundle errors using moonstalk.Error
+		log[err.level or 'Info'](table.concat({err[1].id, err.title or "",err.detail}," | "))
+	end
 	if moonstalk.ready then err.at = request.url or scribe.RequestURL() end
 	if err.title =="true" or err.detail==true then return end -- already caught
 	err.instance = moonstalk.instance -- when in a cluster where errors are collected centrally
