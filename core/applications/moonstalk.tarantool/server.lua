@@ -287,9 +287,11 @@ end
 
 -- # Abstractions
 
-do local httpclient = require"http.client" -- {package=false} tarantool's builtin implicit async module
+do
+local httpclient = require"http.client" -- {package=false} tarantool's builtin implicit async module
 local function sync_err(result,err) return result,err end
 _G.http = _G.http or {}
+local urlencode = require"applications/moonstalk.tarantool/urlencode"
 function http.Request(request) -- FIXME: update to use new .handler and defer behaviours (per openresty)
 	-- request = {url="http://host:port/path", method="GET", headers={Name="value"}, timeout=millis, json={…}, body=[[text]], urlencoded={…}, async=true or function}
 	-- method is optional, default is GET or POST with json, body or urlencoded
@@ -307,7 +309,7 @@ function http.Request(request) -- FIXME: update to use new .handler and defer be
 	if request.urlencoded then
 		request.method ="POST"
 		request.headers['Content-Type'] = "application/x-www-form-urlencoded"
-		request.body =ngx.encode_args(request.urlencoded) -- TODO: server neutral
+		request.body =urlencode.table(request.urlencoded) -- DEPRECATE: -- OPTIMISE: this is an expensive native function, tarantool should now include a native function though doesn't appear to be exposed, or use the curl native one
 	elseif request.json then
 		request.method = request.method or "POST"
 		request.headers['Content-Type'] ="application/json"
