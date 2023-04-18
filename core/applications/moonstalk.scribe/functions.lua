@@ -183,8 +183,8 @@ function Request() -- request can be built in the server, typically by calling t
 	end
 
 	-- # client authentication
-	-- this depends upon page.locks, however may be disabeld with locks=false; a collator may perform authentication earlier; use of locks requires authenticator="namespace.Function", either inherited from site, specified on an address, or added to the page as a page.Authenticator function by a collator
-	if page.locks or page.Authenticator or site.Authenticator then
+	-- this depends upon page.locks, however authentication may be disabled with locks=false; a collator may perform authentication earlier; use of locks requires authenticator="namespace.Function", either inherited from site, specified on an address, or added to the page as a page.Authenticator function by a collator
+	if page.locks or (page.locks ~=false and page.Authenticator or site.Authenticator) then
 		page.state = 4
 		local unlocked
 		if (client.id or request.form.action =="Signin") and (page.Authenticator or site.Authenticator)() and page.locks then -- authenticator functions must return true if they succeed in getting a user; error cases should return scribe.Error; authenticators fetch the user identified by the request.client.token and populate the _G.user table generally with at least nick and a keychain
@@ -422,6 +422,7 @@ function Cookie(meta,value)
 	end
 end
 function SetCookies()
+	log.Debug(page.cookies)
 	for name,cookie in pairs(page.cookies) do
 		-- TODO: add support for signed client-sessions
 		if not cookie.value then -- delete
