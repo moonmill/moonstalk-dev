@@ -1,3 +1,4 @@
+scribe.Cookie(site.token_cookie and site.token_cookie.name or "token")
 if user and page.view =="generic/signin" then
 	-- an edge case of having just signed in from the signin address
 	scribe.Redirect ( request.query_string or "/my/account" )
