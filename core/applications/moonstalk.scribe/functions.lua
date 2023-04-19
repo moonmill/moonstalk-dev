@@ -1020,7 +1020,7 @@ function Collator()
 			if string_match(page_address, urn.pattern) then found = urn; break end
 		end
 	end
-	copy(found, page, true, false)
+	copy(found, page, true, true)
 	return found
 end end
 
