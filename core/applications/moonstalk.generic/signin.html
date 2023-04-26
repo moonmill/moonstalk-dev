@@ -1,33 +1,30 @@
+<?
+scribe.Cookie(site.token_cookie and site.token_cookie.name or "token")
+local message = page.message or l[request.error] or request.error
+?>
+
 <div class="content">
 <h1>?(l.signin_h1)</h1>
 
-<? if page.error_message then ?>
-	<p class="error">?(page.error_message)
-<? if page.reminder then
-	if string.find(request.form.email or "","@") then ?>
-		?(macro{l.signin_reminder, address=request.form.email})
-	<? else request.form.email="" ?>
-		?(l.signin_remind)
-	<? end ?>
-<? end ?>
-</p>
+<? if message then ?>
+<p class="error">?(message)</p>
 <? end ?>
 
+<? if request.error ~="signin_sent" then ?>
 <form method="post" name="signin">
 
 <ul>
-
 <li><b style="font-size:1.2em">?(l.identifier)</b>:<br>
-<input type="text" name="email" value="?(request.form.email)" size="32" />
+<input type="text" name="email" value="?(request.form.email)" size="32" ?(ifthen(not request.form.email,"autofocus"))/>
 <br>?(l.signin_email_hint)<br><br>
 <li><b style="font-size:1.2em">?(l.password)</b>:<br>
-<input type="password" name="password" value="?(request.form.password)" />
+<input type="password" name="password" />
 <br>?(l.signin_password_hint)
 </ul>
-<!-- DEPRECATED: <p>?(l.signin_tip)</p> -->
 
-<input type="hidden" name="action" value="Signin">
+<input type="hidden" name="action" value="Signin" />
 <input type="submit" value="?(L.actionsignin)" />
 </form>
+<? end ?>
 
 </div>

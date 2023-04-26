@@ -430,6 +430,12 @@ de.signin_reminder	= [[Sollen wir Ihnen <a href="/Verifizieren/??(address)">eine
 en.signin_remind		= [[Submit your email address if you need a sign-in link sent to you.]]
 fr.signin_remind		= [[Entrez votre adresse email si vous souhaitez être envoyé identifiants de connexion.]]
 de.signin_remind		= [[Geben Sie Ihre E-Mail-Adresse an, wenn Sie einen Anmeldelink erhalten möchten.]]
+en.signin_sent = "We've sent you a sign-in link, please <b>check your email in a few moments</b>. If you don't find it please check your spam."
+de.signin_sent = "Haben wir Ihnen einen Anmeldelink gesendet. Bitte <b>überprüfen Sie Ihre E-Mails in wenigen Augenblicken</b>. Wenn Sie es nicht finden, überprüfen Sie bitte Ihren Spam."
+fr.signin_sent = "Nous vous avons envoyé un lien de connexion, veuillez <b>vérifier votre messagerie dans quelques instants</b>. Si vous ne le trouvez pas, veuillez vérifier vos spams."
+en.signin_checkemail	="We've already sent you an email, please check your spam. You can try again in a short while if you didn't receive it."
+de.signin_checkemail	="Wir haben Ihnen bereits eine E-Mail gesendet, bitte überprüfen Sie Ihren Spam. Sie können es in Kürze erneut versuchen, wenn Sie es nicht erhalten haben."
+fr.signin_checkemail	="Nous vous avons déjà envoyé un e-mail, merci de vérifier vos spams. Vous pouvez réessayer dans quelques minutes si vous ne l'avez pas reçu."
 
 -- generic words
 en.from				="from"
