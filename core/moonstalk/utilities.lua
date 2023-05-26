@@ -785,15 +785,16 @@ end
 _G.random = Random
 
 function Wrap(a,b,c,d)
-	-- conditional concatenator of up to three arguments, values of which may or may not be present, but will only be returned concatenated if the first and second are; typically used in the form: wrap("prepend",conditional_value,"append") such as to insert an html tag with it's content if present: wrap("<p>",content_value,"</p>")
-	if not a or not b or not c or a=="" or b=="" or c=="" then return "" end
-	return table.concat{a or "", b or "", c or "", d or ""}
+	-- conditional concatenator of 2–4 arguments the last of which must always be present but the prior can be optional; typically used in the form wrap("prepend",conditional_value,"append") such as to insert an html tag with it's content if present e.g. wrap("<p>",content_value,"</p>"); the fourth argument may be used as a terminator e.g. ?(wrap(firstname," ",lastname,", "))
+	-- NOTE: does not handle 3 arguments where the 3rd is conditional, use WrapIf
+	if a and b and not c and not d then return a..b
+	elseif a and b and c then return table.concat{a or "", b or "", c or "", d or ""} end
 end
 _G.wrap = Wrap
 function WrapIf(a,b,c,d)
-	-- as per wrap but only if the 4th argument (d) is truthy, esle returns only the second argument (b)
-	if not d then return b or ""
-	elseif not a or a=="" or not b or b=="" then return "" end
+	-- per wrap but only if the 4th argument (d) is truthy, else returns only the second argument (b)
+	if not d then return b
+	elseif not a or not b then return end
 	return table.concat{a or "", b or "", c or ""}
 end
 _G.wrapif = WrapIf
