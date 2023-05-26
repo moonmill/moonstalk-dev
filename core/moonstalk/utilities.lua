@@ -784,10 +784,10 @@ function Random(array)
 end
 _G.random = Random
 
-function Wrap(a,b,c)
+function Wrap(a,b,c,d)
 	-- conditional concatenator of up to three arguments, values of which may or may not be present, but will only be returned concatenated if the first and second are; typically used in the form: wrap("prepend",conditional_value,"append") such as to insert an html tag with it's content if present: wrap("<p>",content_value,"</p>")
-	if not a or a=="" or not b or b=="" then return "" end
-	return table.concat{a or "", b or "", c or ""}
+	if not a or not b or not c or a=="" or b=="" or c=="" then return "" end
+	return table.concat{a or "", b or "", c or "", d or ""}
 end
 _G.wrap = Wrap
 function WrapIf(a,b,c,d)
@@ -881,11 +881,12 @@ function Varkey (value)
 end
 _G.varkey = Varkey
 
-function Copy(outof,a,b,c)
+function Copy(outof,a,b,c,_depth)
 	-- copies the contents of one table to another (fully recursive), but by default does not replace values
 	-- copy(table,recurse) returns a deep copy by default preserving the metatable
 	-- copy(from,to,replace,recurse) performs a deep copy without replacing(!)
-	-- deep copyies ensure all tables are unique, a shallow copy means table are shared having the same pointers; if recurse is false performs a simple (more efficient) assignment of root values from one table to the other; if replace is false or nil, value will only be copied if not existing; if recurse is true and replace is nil (the defaults) subtable keys will be copied across; false value are preserved
+	-- deep copies ensure all tables are unique, a shallow copy means table are shared having the same pointers; if recurse is false performs a simple (more efficient) assignment of root values from one table to the other; if replace is false or nil, value will only be copied if not existing; if recurse is true and replace is nil (the defaults) subtable keys will be copied across; false value are preserved
+	-- recursion is limited to 4 levels
 	-- performs best if outof has fewer keys than into
 	-- use append() to copy only array values
 	-- WARNING: not safe with arrays except in the root with replace=true -- TODO: add array detection and replace?
@@ -909,11 +910,14 @@ function Copy(outof,a,b,c)
 			if vtype ~='table' and (replace or into[k] ==nil) then
 				into[k] = v
 			elseif vtype =='table' then
+				_depth = (_depth or 0) +1
+				if _depth >4 then return nil,'recursion too deep' end
 				if type(into[k]) =='table' then
-					copy(v,into[k],replace,true)
+					copy(v,into[k],replace,true,_depth)
 				elseif replace or into[k] ==nil then
-					into[k] = copy(v)
+					into[k] = copy(v,nil,nil,nil,_depth)
 				end
+				_depth = _depth -1
 			end
 		end
 	elseif replace then
@@ -1540,7 +1544,7 @@ function SerialiseWith (object,options, _depth)
 	options = options or {}
 	if options.executable then
 		-- handles the root table object as executable lua
-		_format = format.root
+		_format = options.format or format.root
 		options.executable = nil -- musn't apply to sub tables
 		options.truncate = false
 		_depth = -1
@@ -1552,7 +1556,6 @@ function SerialiseWith (object,options, _depth)
 	_format.table_suffix = _format.newline
 	_depth = _depth or 0
 	local maxdepth = options.maxdepth or 5
-	local roottable
 	local serialised = {}
 	if type(object) =='string' then
 		if options.truncate~=false and #object > 200 then object = "* "..tostring(#object).." chars * beginning: "..string_sub(object,1,100) end
@@ -1778,7 +1781,7 @@ function ImportLuaFile(name,environment,preprocess,globalise)
 	if environment ~=_G and not getmetatable(environment) then setmetatable(environment,{__index=_G}) end -- a sandbox that has read access to global environment, and write via _G
 	setfenv(code,environment) -- replace default global environment with (new or specified) sandboxed environment
 	local result,err = pcall(code) -- run and populate the environment
-	if err then assert(result,name..": "..err) end
+	if not result and err then assert(result,name..": "..err) end
 	environment = getfenv(code) -- get the newly populated environment
 	--if environment ~=_G then setmetatable(environment,nil) end -- remove the sandbox -- we can't remove it because local functions still reference it and would thus loose their ability to use globals
 	if globalise ~=false then
