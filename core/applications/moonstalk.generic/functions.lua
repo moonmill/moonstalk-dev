@@ -25,8 +25,11 @@ local function removeNulls(t) -- OPTIMISE: this is only needed in ngx?
 	return t
 end
 function json.decode(data,nulls)
-	if nulls then return json._decode(data) end
-	return removeNulls(json._decode(data))
+	local result
+	result,data = pcall(json._decode,data)
+	if not result then return nil,data end
+	if not nulls then return removeNulls(data) end
+	return data
 end end
 _G.md5 = _G.md5 or require"md5"
 
@@ -128,10 +131,10 @@ function SetSession(session)
 	-- client is optional and will always default to having an empty keychain, it provides a reliable way to access values which can be conditional in user, such as keychain, or session-specific values such as when this session was last seen
 	-- error is propagated to and used by signin page
 	-- user only exists if authenticated and is thus the definitive way to check this
-	page.session = session -- anything in session is available from page.session, notably page.session.error for other values it's better place them in user which gets raised to a global, or client which is merged with request.client
-	local client = request.client
-	local user = session.user
+	_G.page.session = session -- anything in session is available from page.session, notably page.session.error for other values it's better place them in user which gets raised to a global, or client which is merged with request.client
+	local client = _G.request.client
 	copy(session.client,client,true,false)
+	local user = session.user
 	if user then
 		_G.user = user
 		-- the following prefers user values (i.e. persistent settings) but will fallback to client values (i.e. browser dervived values) if authentication fails, and in turn site defaults
