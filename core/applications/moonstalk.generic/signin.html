@@ -1,5 +1,6 @@
 <?
-scribe.Cookie(site.token_cookie and site.token_cookie.name or "token")
+if request.cookies.token then scribe.Cookie(site.token_cookie and site.token_cookie.name or "token") end
+if request.query.urn then request.error = 'existing_urn'; request.form={email=request.query.urn} end
 local message = page.message or l[request.error] or request.error
 ?>
 
