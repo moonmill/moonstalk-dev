@@ -2332,7 +2332,7 @@ function TablePathAssign(within,namespace,assign,force, _ns_table,_ns_pos)
 	end
 	if _ns_table[_ns_pos+1] ==nil then
 		-- last key in namespace
-		rawset(within,_ns_table[1],assign)
+		rawset(within,_ns_table[_ns_pos],assign)
 	else
 		local key = _ns_table[_ns_pos]
 		if not within[key] then
