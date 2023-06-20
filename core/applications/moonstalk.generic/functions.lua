@@ -11,7 +11,7 @@ This application provides essential supporting functions and files to the Moonst
 
 require "md5"
 require "mime" -- {package="mimetypes"}
-bcrypt = require "bcrypt" -- {url="https://raw.githubusercontent.com/mikejsavage/lua-bcrypt/master/rockspec/bcrypt-2.1-4.rockspec"}
+_G.bcrypt = _G.bcrypt or require "bcrypt" -- {url="https://raw.githubusercontent.com/mikejsavage/lua-bcrypt/master/rockspec/bcrypt-2.1-4.rockspec"}
 
 _G.json = _json or require "cjson" -- {package="lua-cjson"} -- OPTIMISE: nginx uses it's own version so we're actually replacing that
 json.encode_sparse_array(true, nil, 1) -- we do not support sparse arrays, instead these must be intentionally constructed, such as using schema model.*()

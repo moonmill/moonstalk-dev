@@ -1888,7 +1888,7 @@ function validate.Telephone(value,arg)
 	elseif not country and string_sub(value,1,1) =="0" then -- TODO: only if locale has trunk access code
 		value = string_sub(value,2)
 	end
-	if #value >16 then return validate.invalid end -- TODO lookup min length from country prefix, currently only has mobile lengths, check both cell length and standard length, and if arg.mobile=true then also check prefix
+	if #value >16 or #value <8 then return validate.invalid end -- TODO lookup min length from country prefix, currently only has mobile lengths, check both cell length and standard length, and if arg.mobile=true then also check prefix
 	local arg_locale
 	if arg and arg.locale then arg_locale = locales[arg.locale] else arg_locale = locales[site.locale] end
 	return (country or arg_locale.e164).."."..value

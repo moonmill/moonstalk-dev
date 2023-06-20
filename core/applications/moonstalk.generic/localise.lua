@@ -4,6 +4,7 @@
 -- in the case of each address having a seperate language but a shared view these mappings are created automatically, also for view.lang.html, and a single view with a vocabulary though in this last case the mappings are redundant as site.addresses.translated[target_language] = "from_address" because the address is identical
 -- obviously it's required that any translated page is associated with a translated address as well, even if the same, so that we can simply swap amongst them
 
+page.headers['x-robots-tag'] = "none"
 local language = request.query.language
 if not vocabulary[language] then return end
 request.client.preferences = request.client.preferences or {}
