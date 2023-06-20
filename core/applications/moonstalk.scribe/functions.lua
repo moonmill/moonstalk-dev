@@ -80,15 +80,15 @@ function Request() -- request can be built in the server, typically by calling t
 
 	-- # Moonstalk globals
 	-- no locale is required until a site is available
-	local request = _G.request
-	request.identifier = scribe.hits
-	log.Info() request.identifier = util_Pad(scribe.hits,3)
-	request.rooturl = request.scheme.."://"..request.domain.."/" -- ?(request.rooturl)my/path
-	-- NOTE: request.client must be set by the server with ip; an asbtract representation of the merged conditions of request and user (if any) that may change from request to request, whereas a user should be mostly constant, and bound to a client via a session
+		local request = _G.request
+		request.identifier = scribe.hits
+		log.Info() request.identifier = util_Pad(scribe.hits,3)
+		request.rooturl = request.scheme.."://"..request.domain.."/" -- ?(request.rooturl)my/path
+		-- NOTE: request.client must be set by the server with ip; an asbtract representation of the merged conditions of request and user (if any) that may change from request to request, whereas a user should be mostly constant, and bound to a client via a session
 
-	log.Info() request.cpuclock = os.clock()
-	request[string_lower(request.method)] = true
-	log.Info(request.client.ip.." "..request.method.." "..scribe.RequestURL())
+		log.Info() request.cpuclock = os.clock()
+		request[string_lower(request.method)] = true
+		log.Info(request.client.ip.." "..request.method.." "..scribe.RequestURL())
 
 	-- # Scribe globals
 	_G.user = false
@@ -139,7 +139,7 @@ function Request() -- request can be built in the server, typically by calling t
 	else
 		page.state = 3
 		request.type = string_match(request.headers['content-type'], "([^;]+)")
-		if tonumber(request.headers['content-length']) > (page.post or scribe.post).maxsize then
+		if tonumber(request.headers['content-length']) >(page.post and page.post.maxsize or scribe.post.maxsize) then
 			page.status = 413; output = "request body too large"; return -- returning immediately thus must provide string not table
 			-- in an async server this should occur before a large body has been fully read, thus we can reject if not permitted, before it has been fully received, written to a temporary file, and processed; however if the curator and collator use database calls, then a significaant part of the body may already have been received by this point thus presenting greater DoS opportunity on all moonstalk processed addresses
 		end
@@ -306,6 +306,7 @@ end
 
 function Page(path,env)
 	-- executes a view and/or controller for the current site
+	-- TODO: if site.polyglot and controler|view.vocabulary then moonstalk.Environment(request.client, site, site.views.home) however this should really cover both the controller and the view so it would be benficial having site.pages[].vocabulary emulating addresses to combine properties shared between
 	local result
 	if site.controllers[path] then
 		result = scribe.Controller(path,env)
@@ -422,7 +423,6 @@ function Cookie(meta,value)
 	end
 end
 function SetCookies()
-	log.Debug(page.cookies)
 	for name,cookie in pairs(page.cookies) do
 		-- TODO: add support for signed client-sessions
 		if not cookie.value then -- delete
@@ -503,9 +503,7 @@ end
 function RedirectSecure(address,code)
 	-- address may be ommitted and the redirect will be to the current address, thus converting a non-secure URL
 	if page.error then return end -- preserve errors
-	local cookies = page.cookies -- needs to preserve for redirect as abandon discards them
 	scribe.Abandon(code or 302)
-	_G.page.cookies = cookies
 	if not address then address = string_sub(request.path,2) end -- FIXME: request.path should not have the slash prefix as all internal addresses are absolute
 	if request.query_string then
 		page.headers["Location"] = table_concat{"https://",site.domain,"/",address,"?",request.query_string}
@@ -817,7 +815,6 @@ function Site(site)
 		site.secure = nil
 		bundle.Error(site,"Cannot secure an unsecured site; certificate missing")
 	end
-	if site.vocabulary and site.vocabulary.mt then log.Alert(00000000) end
 
 	scribe.ConfigureBundle(site,"sites")
 
@@ -1020,7 +1017,7 @@ function Collator()
 			if string_match(page_address, urn.pattern) then found = urn; break end
 		end
 	end
-	copy(found, page, true, true)
+	copy(found, page, true, true) -- this must always be recursive copy as headers becomes the page's and can thus be modified, which if not copied would persist across different requests
 	return found
 end end
 
