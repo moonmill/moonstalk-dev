@@ -969,10 +969,13 @@ _G.append = Append
 
 function ArrayOfKeys(from,matching)
 	-- returns an array of all keys, or only keys where its table value containsone of the given array of keys
-	-- ArrayOfKeys
 	local array = {}
+	local count = 0
 	for key,value in pairs(from) do
-		if not matching or util.AnyKeysExist(value,matching) then table_insert(array,key) end
+		if not matching or util.AnyKeysExist(value,matching) then
+			count = count +1
+			array[count] = key
+		end
 	end
 	return array
 end
@@ -3203,6 +3206,32 @@ function ShortToken(length,alphabet)
 	for position=1,length do id[position] = alphabet[math_random(1,max)] end
 	return table.concat(id)
 end
+end
+
+local alphabet = {chars="JWDFKMQLNPABCSTGHVYXRZ34589267"} -- no vowels prevents creation of words, similarly doesn't use 0 and 1 -- TODO: randomise and save to node -- TODO: allow alphabet to be specified
+for i=1,#alphabet.chars do
+	local letter = string.sub(alphabet.chars,i,i)
+	alphabet[letter] = i
+	alphabet[i] = letter
+end
+function EncodeAlphabet(number)
+	-- encodes a number as an alphanumeric string, using the default alphabet of 30 chars, accommodates numbers just under 1m (6 digits) in 4 chars, or just under 1b (9 digits) in 6 chars
+	local encoded = ""
+	local max = #alphabet
+	while number >=0 do
+		encoded = (alphabet[ number % max ] or alphabet[max]) .. encoded -- needs a default for when the number deviveds as0, which is the same as max thus the last letter
+		if number <= max then break end
+		number = math.floor(number / max)
+	end
+	return encoded
+end
+function DecodeAlphabet(encoded)
+	local number = 0
+	local max = #alphabet
+	for i=1,#encoded do
+		number = number *max +alphabet[ string.sub(encoded,i,i) ]
+	end
+	return number
 end
 
 return util
