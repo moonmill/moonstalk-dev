@@ -3214,7 +3214,7 @@ for i=1,#alphabet.chars do
 	alphabet[letter] = i
 	alphabet[i] = letter
 end
-function EncodeAlphabet(number)
+function EncodeAlphabetic(number)
 	-- encodes a number as an alphanumeric string, using the default alphabet of 30 chars, accommodates numbers just under 1m (6 digits) in 4 chars, or just under 1b (9 digits) in 6 chars
 	local encoded = ""
 	local max = #alphabet
@@ -3225,7 +3225,7 @@ function EncodeAlphabet(number)
 	end
 	return encoded
 end
-function DecodeAlphabet(encoded)
+function DecodeAlphabetic(encoded)
 	local number = 0
 	local max = #alphabet
 	for i=1,#encoded do
