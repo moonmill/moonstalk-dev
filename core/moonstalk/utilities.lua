@@ -3208,7 +3208,7 @@ function ShortToken(length,alphabet)
 end
 end
 
-local alphabet = {chars="JWDFKMQLNPABCSTGHVYXRZ34589267"} -- no vowels prevents creation of words, similarly doesn't use 0 and 1 -- TODO: randomise and save to node -- TODO: allow alphabet to be specified
+local alphabet = {chars="JWDFKMQLNPABCSTGHVYXRZ4589267"} -- no vowels prevents creation of words, similarly doesn't use 0,1,3 -- TODO: randomise and save to node -- TODO: allow alphabet to be specified
 for i=1,#alphabet.chars do
 	local letter = string.sub(alphabet.chars,i,i)
 	alphabet[letter] = i
