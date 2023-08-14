@@ -138,7 +138,7 @@ function Request() -- request can be built in the server, typically by calling t
 		request.form = EMPTY_TABLE
 	else
 		page.state = 3
-		request.type = string_match(request.headers['content-type'], "([^;]+)")
+		request.type = string_match(request.headers['content-type'] or "", "([^;]+)")
 		if tonumber(request.headers['content-length']) >(page.post and page.post.maxsize or scribe.post.maxsize) then
 			page.status = 413; output = "request body too large"; return -- returning immediately thus must provide string not table
 			-- in an async server this should occur before a large body has been fully read, thus we can reject if not permitted, before it has been fully received, written to a temporary file, and processed; however if the curator and collator use database calls, then a significaant part of the body may already have been received by this point thus presenting greater DoS opportunity on all moonstalk processed addresses
@@ -215,7 +215,7 @@ function Request() -- request can be built in the server, typically by calling t
 		if request.cookies.preferences then
 			-- the preferences cookie is strictly an application routine, but is never expected to be used alongside a session and should be removed when a (persistent) session is established  (typically populated by a database interface); it is sufficiently common that we inline the condition handling rather than invoking additional handlers; the normalised keys from this thus need copying
 			page.state = 5
-			client.preferences = json.decode(request.cookies.preferences)
+			client.preferences = json.decode(request.cookies.preferences) or log.Debug("bad preferences: "..request.cookies.preferences) or EMPTY_TABLE
 			client.language = client.preferences.language
 			client.locale = client.preferences.locale
 			client.timezone = client.preferences.timezone
@@ -243,6 +243,7 @@ function Request() -- request can be built in the server, typically by calling t
 	-- # Localisation
 	-- a locale is required by most applications; and is derived from request and user; but may be overridden in sites using localise=false
 	-- a language is required for collators to select localised page content (but should fallback to site default or first available)
+	log.Debug(client)
 	log.Debug() if page.view and page.vocabulary and lfs.attributes(site.files[page.view..".vocab.lua"].path,"modification") > site.files[page.view..".vocab.lua"].imported then local view=site.views[page.view]; scribe.ImportViewVocabulary(site,view); page.vocabulary=view.vocabulary end -- as the vocabulary was already assigned from the address, in dev mode we must reassign it if changed
 	local env_language = moonstalk_Environment(client, site, page)
 	page.language = page.language or env_language
@@ -348,8 +349,8 @@ function View(path)
 	local view = site.views[path]
 	log.Debug() if not view then return scribe.Error{realm="page",title="Missing view",detail=path} end
 	page.type = view.type
-	if view.translated then -- FIXME:
-		view = view[request.client.language] or view[request.client.locale] or view -- the assumption is that the first language contains a locale and is therefore the best match
+	if view.locales then
+		view = view.locales[request.client.language] or view.locales[request.client.locale] or view -- the assumption is that the first language contains a locale and is therefore the best match
 	end
 	page.language = page.language or view.language -- the only value actually copied from view to page unless it has been defined elsewhere (probably address)
 	log.Debug("running view: "..view.path)
@@ -1489,32 +1490,38 @@ function ConfigureBundle(bundle,kind)
 	local counts = {controllers=0,views=0,addresses=0}
 
 	local localised = {}
+	local vocabulary = vocabulary
+	local locales = locales
 	for name,file in pairs(bundle.files) do
 		if string.sub(file.file,1,8) ~="private/" then
 			-- normalise files by uri and merge translations; also drop hidden/excluded files
 			if moonstalk.loaders[file.type] then
-				-- if translated the file value is meaningless as it only respresents the first recognised URI and consumer must check if file.translated is set
+				-- if translated the file value is meaningless as it only respresents the first recognised URI and consumer must check for file.locales
 				-- if the file name has multiple formats i.e. name.html and name.lua then the format is meaningless but in some cases (views) will be set to the parsed view's format
 				-- the following as used only if this is the first assignment of this name
 				-- file and name preserve accented chars, uri and id are normalised
 				-- preserve an existing name/id's table or set to this one if the first
 
 				-- dotted segments in file names indicate localisation, otherwise are not allowed except some such as .vocab.lua
-				-- NOTE: translated files may use either format uri.lang.ext or uri.lang.lang-uri.ext, where the prior results in the scribe not assigning addresses for the translated files, and another routine will be required to address them, such as a collator using cookie or url prefix/domain, the latter defines a language-specific address uri, however it cannot be the same as any other language unless site.localise=true -- TODO:
-				local locale,localised_name = string.match(file.name,"%.([^%.]*)%.?(.*)$")
+				-- NOTE: translated files may use either format uri.lang.ext or uri.lang-uri.ext, where the prior results in the scribe not assigning addresses for the translated files, and another routine will be required to address them, such as a collator using cookie or url prefix/domain, the latter defines a language-specific address uri, however it cannot be the same as any other language unless site.localise=true -- TODO:
+				local locale = string.match(file.file,"%.([^%.]+)%.[^%.]+$")
 				local merged_uri = file.file -- we don't merge different types
-				if locales[locale] then
-					file.uri = string.sub(file.file,1,-(#locale+1)) -- NOTE: name and file remain unchanged
+				if vocabulary[locale] or locales[locale] then
+					log.Debug("adding translation "..file.uri.."."..locale)
+					local position = string.find(file.file,"."..locale,1,true)
+					file.uri = string.sub(file.file,1,position-1) -- NOTE: name and file remain unchanged
 					file.id = util.Transliterate(file.uri,true)
 					localised[file.id] = localised[file.id] or {} -- all files with same id share the same locales table
 					file.locales = localised[file.id]
 					file.locales[locale] = file
-				elseif locale then
-					moonstalk.Error{bundle, title="Unknown localisation '"..locale.."' for file: "..file.file}
+					file.locale = locale
 				else
 					file.id = util.Transliterate(file.uri,true)
 				end
-
+if file.uri =="terms" then
+	log.Debug(util.Serialise(file.locales,1))
+	end
+				
 				local subfolder = string.match(file.id,"^(.*)/")
 				if kind ~="sites" then
 					-- all applications resources must be prefixed with their id
@@ -1540,28 +1547,20 @@ function ConfigureBundle(bundle,kind)
 				elseif file.type=="html" then
 					-- a view; may be mapped to a url; can be translated (has a language)
 					file.bundle = bundle.id
-					local function load(file)
-						local view,err = scribe.LoadView(file)
-						if err then moonstalk.BundleError(bundle,{localised=(kind=="sites"),realm="bundle",title="Error loading view",detail=err,class="lua"}) end
-						return view
-					end
-					if not file.locales then
-						bundle.views[file.id] = load(file)
-					else -- localised
-						bundle.views[file.id] = file
-						local view = bundle.views[file.id]
-						for language in pairs(file.locales) do
-							view[language] = load(path..'.'..language)
-							view[language].language = language -- sets the content-language
-							if #language >2 then
-								-- for localised languages (en-gb) where either the nonlocalised language (en) or locale (gb) are not also defined, we'll define a localised variant as its equivalent
-								if not file[string.sub(language,1,2)] then view[string.sub(language,1,2)] = view[language] end
-								if not file[string.sub(language,4,5)] then view[string.sub(language,4,5)] = view[language] end -- NOTE: this has problems if both fr and ca-fr are defined as the canadian variant might become the default for french and/or france, however it is recommended that if localised variants are being used, that they must be specified fully in all cases, e.g. use ca-fr and fr-fr, the generic 'fr' version will then be random unless also otherwise specified
-							end
-							site.vocabulary[language] = site.vocabulary[language] or {}
-							util.ArrayAdd(bundle.translated, language)
-							view.translated = true
+					local err
+					bundle.views[file.id],err = scribe.LoadView(file)
+					if err then moonstalk.BundleError(bundle,{localised=(kind=="sites"),realm="bundle",title="Error loading view",detail=err,class="lua"}) end
+					if file.locale then
+						local language = file.locale
+						file.language = file.locale -- sets the content-language
+						if #language >2 then -- TODO:
+							-- for localised languages (en-gb) where either the nonlocalised language (en) or locale (gb) are not also defined, we'll define a localised variant as its equivalent
+							if not file.locales[string.sub(language,1,2)] then file.locales[string.sub(language,1,2)] = file.locales[language] end
+							if not file.locales[string.sub(language,4,5)] then file.locales[string.sub(language,4,5)] = file.locales[language] end -- NOTE: this has problems if both fr and ca-fr are defined as the canadian variant might become the default for french and/or france, however it is recommended that if localised variants are being used, that they must be specified fully in all cases, e.g. use ca-fr and fr-fr, the generic 'fr' version will then be random unless also otherwise specified
 						end
+						site.vocabulary[language] = site.vocabulary[language] or {}
+						util.ArrayAdd(bundle.translated, language)
+						file.translated = true
 					end
 
 					if kind=="sites" and bundle.autoaddresses~=false and file.name~="template" then
