@@ -13,8 +13,8 @@ require "md5"
 require "mime" -- {package="mimetypes"}
 _G.bcrypt = _G.bcrypt or require "bcrypt" -- {url="https://raw.githubusercontent.com/mikejsavage/lua-bcrypt/master/rockspec/bcrypt-2.1-4.rockspec"}
 
-_G.json = _json or require "cjson" -- {package="lua-cjson"} -- OPTIMISE: nginx uses it's own version so we're actually replacing that
-json.encode_sparse_array(true, nil, 1) -- we do not support sparse arrays, instead these must be intentionally constructed, such as using schema model.*()
+_G.json = require "cjson" -- {package="lua-cjson"} -- nginx uses it's own version, as does tarantool (which very desireably allows passing config options to the encode function) though not loaded by default; this therefore replaces both of those simply in order to be consistent despite the lost functionality
+json.encode_sparse_array(true, 2, 1) -- we support sparse arrays; if an object is desired e.g. to retain positions, these must be intentionally constructed, the easiest way simply being to add a non-int key e.g. _=true -- TODO: a better way that is comaptible across servers -- NOTE: empty tables are encoded as objects, thus in order to be an array must be explictly replaced with json.empty_array
 json._decode = json.decode
 do local type=type; local null=json.null
 local function removeNulls(t) -- OPTIMISE: this is only needed in ngx?

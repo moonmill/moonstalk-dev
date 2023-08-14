@@ -74,9 +74,7 @@ require "moonstalk/logger" -- must be after utilities as we need that to load wi
 dofile "core/globals/Attributes.lua"
 
 _G.EMPTY_TABLE = {} -- TODO: if node.debug set a metatable that throws an error when modified
-if node.environment ~="production" and node.logging >=3 then
-	setmetatable(_G.EMPTY_TABLE,{__newindex=function(_,key) moonstalk.Error{title="Attempt to assign key on reserved reused EMPTY_TABLE: "..key, level="Notice"} end})
-end
+setmetatable(_G.EMPTY_TABLE,{__newindex=function(_,key) moonstalk.Error{title="Attempt to assign key on reserved reused EMPTY_TABLE: "..key, level="Notice"} end})
 
 keyed(moonstalk.reserved)
 host.servers = keyed(copy(node.servers))
@@ -918,7 +916,7 @@ function moonstalk.Continuum()
 	return continuum.threshold
 end
 function moonstalk.SetContinuum(key,value)
-	-- WARNING: continuum.max and continuum.max must be the same length; continuum.max must have enough capacity for the intended use
+	-- WARNING: continuum.min and continuum.max must be the same length; continuum.max must have enough capacity for the intended use
 	continuum[key]=value
 end
 function moonstalk.GetContinuum(key) return continuum[key] end

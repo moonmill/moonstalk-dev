@@ -14,7 +14,7 @@ Caching:
 -- TODO: capability to reinitialise moonstalk in case of errors, so we don't have to restart
 moonstalk.instance = node.tarantool.instance or "999" -- FIXME:
 
-_G.json = require "json" -- {package=false}; this is the built-in cjson module, which we use in favour of the rocks one as it has some tweaks
+-- _G.json = require "json" -- {package=false}; this is the built-in cjson module, which allows passing a config with the encode (much better than the rocks cjson but not available in openresty thus we standardise per the generic app)
 _G.fiber = require "fiber" -- {package=false}
 _G.socket = require "socket" -- {package=false }-- tarantool provides its own socket module that is mostly compatible with LuaSocket
 _G.fio = require"fio" -- {package=false}; built-in
@@ -45,7 +45,7 @@ do
 		task.started = tt.now()
 		local scheduled = task.at
 		local result,err = pcall(util.TablePath(task.handler), task)
-		if err then table.insert(tt.tasks.errors, task.handler.." at "..os.date()..": "..err); moonstalk.Error{level="Priority", title="task "..task.handler.." failed", detail=err}
+		if err then table.insert(tt.tasks.errors, task.handler.." at "..os.date()..": "..err); moonstalk.Error{tt, level="Priority", title="task "..task.handler.." failed", detail=err}
 		elseif task.at ~=scheduled then
 			task.run = (task.run or 0) +1
 			task.reschedule = nil
@@ -176,8 +176,13 @@ do local starter = tarantool.Starter -- preserve the original as we're replacing
 function Starter() -- replaces the default in functions
 	tarantool.started = os.time()
 	starter() -- run the original
+	tt.tasks.pending = databin.Load"tasks_tarantool" or {}
 	tt.tasks.scheduler = fiber.new(tt.tasks.Scheduler)
 end end
+
+function Shutdown()
+	databin.Save("tasks_tarantool",tt.tasks.pending)
+end
 
 
 -- # database functions
@@ -345,7 +350,9 @@ local iv = string.sub(node.secret,-16)
 local string_gsub = string.gsub
 _G.digest = require "digest" -- {package=false} -- bundled
 local encode = digest.base64_encode
+_G.util.b64 = encode
 local decode = digest.base64_decode
+_G.util.unb64 = decode
 _G.crypto =  require "crypto" -- {package=false} -- bundled
 local encrypt = digest.aes256cbc.encrypt
 local decrypt = digest.aes256cbc.decrypt

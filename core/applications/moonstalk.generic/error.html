@@ -22,7 +22,7 @@ end
 local function items (errors)
 	for _,item in ipairs(errors or {}) do
 		write[[<li><b>]] write(item.title) write[[</b>]]
-		if is_dev then
+		if is_dev or item.public then
 			if item[1] then write [[ from ]] write(item[1].id) end
 			write[[<br>]]
 			if item.detail then
