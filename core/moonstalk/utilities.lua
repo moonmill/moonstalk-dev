@@ -1958,14 +1958,13 @@ function ArrayContainsAll(array,values)
 	end
 end
 
-function ArrayContainsAny(array,values)
-	-- look in an array of values, for any value from another array
+function ArrayContainsAny(array,values,is_keyed)
+	-- look in an array of values, for any value from another array (or keyed table if is_keyed=true)
 	-- returns the matched value and its position in the array
 	if not values or not array then return end
-	local has = {}
-	for position,value in ipairs(values) do has[value] = true end
+	values = is_keyed and values or keyed(values)
 	for position,arrayvalue in ipairs(array) do
-		if has[arrayvalue] then return arrayvalue, position end
+		if values[arrayvalue] then return arrayvalue, position end
 	end
 end
 

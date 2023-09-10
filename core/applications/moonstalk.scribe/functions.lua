@@ -80,15 +80,15 @@ function Request() -- request can be built in the server, typically by calling t
 
 	-- # Moonstalk globals
 	-- no locale is required until a site is available
-		local request = _G.request
-		request.identifier = scribe.hits
-		log.Info() request.identifier = util_Pad(scribe.hits,3)
-		request.rooturl = request.scheme.."://"..request.domain.."/" -- ?(request.rooturl)my/path
-		-- NOTE: request.client must be set by the server with ip; an asbtract representation of the merged conditions of request and user (if any) that may change from request to request, whereas a user should be mostly constant, and bound to a client via a session
+	local request = _G.request
+	request.identifier = scribe.hits
+	log.Info() request.identifier = util_Pad(scribe.hits,3)
+	request.rooturl = request.scheme.."://"..request.domain.."/" -- ?(request.rooturl)my/path
+	-- NOTE: request.client must be set by the server with ip; an asbtract representation of the merged conditions of request and user (if any) that may change from request to request, whereas a user should be mostly constant, and bound to a client via a session
 
-		log.Info() request.cpuclock = os.clock()
-		request[string_lower(request.method)] = true
-		log.Info(request.client.ip.." "..request.method.." "..scribe.RequestURL())
+	log.Info() request.cpuclock = os.clock()
+	request[string_lower(request.method)] = true
+	log.Info(request.client.ip.." "..request.method.." "..scribe.RequestURL())
 
 	-- # Scribe globals
 	_G.user = false
@@ -350,7 +350,7 @@ function View(path)
 	log.Debug() if not view then return scribe.Error{realm="page",title="Missing view",detail=path} end
 	page.type = view.type
 	if view.locales then
-		view = view.locales[request.client.language] or view.locales[request.client.locale] or view -- the assumption is that the first language contains a locale and is therefore the best match
+		view = view.locales[page.language] or view.locales[request.client.language] or view.locales[request.client.locale] or view.locales[site.language] or view -- if an address or collator has set the language use this, else try and match on client language or locale, otherwise the site default and failing even that the first loaded view (essentially random)
 	end
 	page.language = page.language or view.language -- the only value actually copied from view to page unless it has been defined elsewhere (probably address)
 	log.Debug("running view: "..view.path)
@@ -1018,7 +1018,20 @@ function Collator()
 			if string_match(page_address, urn.pattern) then found = urn; break end
 		end
 	end
-	copy(found, page, true, true) -- this must always be recursive copy as headers becomes the page's and can thus be modified, which if not copied would persist across different requests
+	-- copy values
+	for key,value in pairs(found) do
+		if not page[key] then
+			-- anything not already specified is set as is, including tables that are reused across requests; for tables
+			page[key] = value
+		elseif type(found[key]) =='table' then
+			-- pages always have their own headers table so that it is not reused across requests
+			local branch = found[key]
+			for key,value in pairs(found) do
+				branch[key] = value
+			end
+		end
+	end
+	copy(found, page, true, true) -- this must always be recursive copy as tables not in the page and may be modified, which if not copied would persist across different requests; values that are not
 	return found
 end end
 
