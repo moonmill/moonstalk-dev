@@ -23,91 +23,158 @@ _G.csv = require"csv" -- {package=false}; built-in
 NULL = box.NULL
 ERROR = "\0"
 
-tasks = {
+_G.tasks = { -- TODO: move to dedicated application
+	-- NOTE: not to be confused with db.tasks[handler|id] = task -- provides task persistence and lookup; used to build the pending array after startup
 	window	= 60, -- to check for new tasks, any new task needed sooner (at=0) involve killing the sleeping coroutine and recreating it to run immediately, therefore in high demand environments this should be set as low as possible, e.g. 1sec thus avoiding the need to cancel and recreate
-	pending	= {count=0}, -- reverse order with highest index and lowest timestamp (closest in future) the next to run, whilst the lowest index and highest timestamp (further in future)
-	running = {},
+	pending = {},
 	errors = {},
 	wakeup = now, -- time for lazy tasks to be run on next wakeup window
-} -- TODO: persistence saving to a record, and also building tasks.named[task.handler]=at with the earliest time; probably easiest to use databin, thus avoiding startup overhead
--- TODO: instance allocation
-do
-	local pending = tt.tasks.pending
-	-- TODO: reschedule a task that's already pending
-	function tasks.Runner(task)
-		-- WARNING: expects server to be using UTC (or a time zone without daylight savings changes) and does not use the monotonic fiber.clock; time localisation should be performed with client context
-		-- runs as new fiber to prevent being cancelled with the scheduler, permitting safe use of fiber.yield -- TODO: test
-		-- as an async task it will already have been removed from pending as this does not run until the next yield
-		log.Info("running task "..task.handler)
-		table.insert(tt.tasks.running,task) -- not more simply by name as we could have multiple instances of the same task running, each of which has its own task table
-		task.finished = nil
-		log.Info() task.starting = nil
-		task.started = tt.now()
-		local scheduled = task.at
-		local result,err = pcall(util.TablePath(task.handler), task)
-		if err then table.insert(tt.tasks.errors, task.handler.." at "..os.date()..": "..err); moonstalk.Error{tt, level="Priority", title="task "..task.handler.." failed", detail=err}
-		elseif task.at ~=scheduled then
-			task.run = (task.run or 0) +1
-			task.reschedule = nil
-			log.Debug("rescheduling task "..task.handler)
-			tt.Task(task)
-		end
-		task.finished = tt.now()
-		task.timer = task.finished - task.started
-		task.started = nil
-		util.ArrayRemove(tt.tasks.running,task)
-		-- TODO: poll=true; move to a finished table that we keep trimmed, and permit lookup by id
+}
+
+function tasks.runner(task)
+	-- WARNING: expects server to be using UTC (or a time zone without daylight savings changes) and does not use the monotonic fiber.clock; time localisation should be performed with client context
+	-- runs as new fiber to prevent being cancelled with the scheduler, permitting safe use of fiber.yield -- TODO: test
+	-- as an async task it will already have been removed from pending as this does not run until the next yield
+	log.Info("running task "..task[1])
+	task.finished = nil
+	task.started = tt.now()
+	task.scheduled = task.at -- allows introspection if rescheduled
+	local result,error,failure = pcall(util.TablePath(task[1]), task)
+	-- remove the task from pending as has now run and shoudl be rescheduled or removed
+	task.finished = tt.now() -- timer only, does not indicate completed
+	task.duration = task.finished - task.started
+	task.started = nil
+	if failure or not result and error then
+		task.error = error or failure
+		tasks.errors[task.id or task[1]] = task
+		moonstalk.Error{tt, level="Priority", title="task "..task[1].." failed", detail=err}
 	end
-	function tasks.Scheduler()
-		-- currently only supports a single task at a time
-		-- TODO: support resource limits and concurrent tasks (i.e. scheduling a new task if the current is waiting on async actions such as webservices or processes), allow them to run concurrently rather than getting stuck in a single task queue); tasks would thus need to indcate async=false if not cooperative, else indicate their resource usage, e.g. http=1, cpu=1
-		while true do
-			local now = tt.now()
-			local wakeup = now +tt.tasks.window
-			local task = pending[pending.count]
-			local sleep
-			if not task or task.at > wakeup then -- not due before next wakeup
-				tt.tasks.wakeup = wakeup
-				fiber.sleep(tt.tasks.window)
-			elseif task.at <= now then -- due
-				log.Info() task.starting = true
-				pending[pending.count] = nil -- remove the task as will run soon
-				fiber.new(tt.tasks.Runner,task):name(task.handler)
-				pending.count = pending.count -1
-				fiber.yield() -- must yield after each task in case we have a big backlog
-			else -- else task.at <= wakeup; due before next wakeup
-				tt.tasks.wakeup = now -task.at
-				fiber.sleep(now -task.at)
+	task.rescheduled = task.scheduled ~=task.at
+	task.scheduled = nil
+	if task.repeats or task.rescheduled then -- needs rescheduling (regardless of error)
+		task.runs = (task.runs or 0) +1
+		log.Debug("rescheduling task "..task[1])
+		tasks.Schedule(task)
+	else -- does not run again
+		task.completed = true
+	end
+end
+function tasks.scheduler()
+	-- currently only supports a single task at a time
+	-- tasks.pending is ephemeral and rebuilt on intitialisation (just after startup, when this first runs)
+	-- TODO: support resource limits and concurrent tasks (i.e. scheduling a new task if the current is waiting on async actions such as webservices or processes), allow them to run concurrently rather than getting stuck in a single task queue); tasks would thus need to indcate async=false if not cooperative, else indicate their resource usage, e.g. http=1, cpu=1
+	local pending = tasks.pending
+	if not tasks.initialised then
+		-- initialise from persistence
+		local count = 0
+		for _,task in pairs(db.tasks) do
+			if not task.completed then
+				count = count +1
+				pending[count] = task
 			end
 		end
+		pending.count = count
+		util.SortArrayByKey(pending,"at")
+		tasks.initialised = true
 	end
-	function Task(task)
-		-- {at=timestamp, handler="ns.Function", async=false}; at=nil to run at next wakeup (tt.tasks.window); at=0 to run asap (after the next implict yield)
-		-- handlers receive the task table as their only argument; tasks are removed as they are run, if the task needs to repeat it may change task.at =time.at+interval or a new timestamp
-		-- handlers should use fiber.yield if carrying out multiple actions; handlers must not use sleep as this would sleep the scheduler itself, to sleep they should simply reschedule themselves
-		task.at = task.at or tt.tasks.wakeup or tt.now() -- will run first upon wakeup
-		log.Info("scheduling task "..task.handler.." in "..(task.at - tt.now()).." secs")
-		if pending.count ==0 or task.at < pending[pending.count].at then
-			pending[pending.count+1] = task
-		elseif task.at >= pending[1].at then
-			table.insert(pending,1,task)
-		else
-			for i=pending.count,1,-1 do
-				-- iterate backwards to find the position
-				if task.at > pending[i].at then table.insert(pending,i,task); break end
-			end
-		end
-		pending.count = pending.count +1
-		--box.space.tasks:insert(task)
-		if task.at < pending[pending.count].at then
-			-- need to run sooner
-			log.Debug("restarting scheduler")
-			tt.tasks.scheduler:cancel() -- stops at first yield following this call
-			tt.tasks.scheduler = fiber.new(tt.tasks.Scheduler)
-			tt.tasks.scheduler:name"scheduler"
+	while true do
+		local now = tt.now()
+		local wakeup = now +tasks.window
+		local task = pending[pending.count]
+		local sleep
+		if not task or task.at > wakeup then -- not due before next wakeup
+			tasks.wakeup = wakeup
+			fiber.sleep(tasks.window)
+		elseif task.at <= now then -- due
+			local pending = tasks.pending
+			pending[pending.count] = nil
+			pending.count = pending.count -1
+			fiber.new(tasks.runner,task):name(task[1])
+			fiber.yield() -- must yield after each task in case we have a big backlog
+		else -- else task.at <= wakeup; due before next wakeup
+			tasks.wakeup = now -task.at
+			fiber.sleep(now -task.at)
 		end
 	end
 end
+
+function tasks.Persistent(task)
+	-- initialise a task that persists and may thus be polled, preserves original if already created, thus only initialises if not existing; ephemeral tasks must be removed by their polling mechanism -- TODO: expiry task to remove completed tasks, probably using a tasks.expire window
+	-- id = true to create a unique ID, or specify the identifier for polling instead of the handler name, e.g. when a handler is used by multiple individual tasks
+	if db.tasks[task.id or task[1]] then return db.tasks[task.id or task[1]] end
+	if task.id ==true then task.id = util.CreateID() end
+	db.tasks[task.id or task[1]] = task
+	task.persistent = true
+	return tasks.Schedule(task)
+end
+
+function tasks.Schedule(task)
+	-- WARNING: tasks must be given an ID if their handler is shared by multiple tasks
+	-- {"namespace.Function", at=timestamp or repeats={hour=0,min=0}, async=false, keep=true}; at=nil to run at next wakeup (tasks.window); at=0 to run asap (after the next implict yield); repeat daily at the given hour (and min), the task may check days and dates and simply return if it is to skip execution
+	-- rescheduling using task.repeats only applies if task.at is not changed, thus if changed will apply on the next run if not changed again
+	-- handlers receive the task table as their only argument; tasks are removed after being run regardless of outcome, if the task has repeats it will be rescheduled, else it may change task.at =time.at+interval or a new timestamp, otherwise if it returns an error it will be kept for lookup
+	-- handlers may return nil and an error message to fail
+	-- handlers that fail are temporarily kept in the ephemeral tasks.errors table until restart -- TODO: error retry for non-repeating/non-rescheduled tasks
+	-- handlers should use fiber.yield if carrying out multiple actions; handlers must not use sleep as this would sleep the scheduler itself
+	-- handlers may pseudo-sleep by rescheduling themselves, returning nil; they may be interrupted or error and be retried; for all these they should simply set a state on themself, and check the state when run to resume appropriately
+	-- TODO: mechanism for emphemeral tasks to be pollable, e.g. id=true;
+	local now = tt.now()
+	if task.repeats and not task.rescheduled then
+		-- NOTE: currently we only handle hour daily; if not meant to run on a given day the task may simply return causing rescheduling to the next day
+		local date = os.date"*t"
+		date.hour = task.repeats.hour
+		date.min = task.repeats.min or 0
+		date.sec = 0 -- we currently onyl support minute resolution
+		local at = os.time(date)
+		if at >now then
+			task.at = at
+		else -- passed, schedule for tomorrow
+			date.day = date.day +1
+			task.at = os.time(date)
+		end
+	elseif not tasks.at then -- run immediately
+		task.at = 0
+	end
+	log.Info("scheduling task "..task[1].." in "..(task.at - now).." secs")
+	local pending = tasks.pending
+	if pending.count ==0 or task.at <pending[pending.count].at then
+		-- next to run, add to top
+		pending[pending.count+1] = task
+		if task.at <tasks.wakeup then
+			log.Debug("restarting scheduler")
+			tasks.scheduler_fiber:cancel() -- stops at first yield following this call
+			tasks.scheduler_fiber = fiber.new(tasks.scheduler)
+			tasks.scheduler_fiber:name"scheduler"
+		end
+	elseif task.at >= pending[1].at then
+		-- last to run, add to bottom
+		table.insert(pending,1,task)
+	else
+		-- iterate forwards to find the position; this assumes new tasks are added with a close at and rescheduled tasks are generally the oldest
+		for i=1,pending.count do
+			if task.at >pending[i].at then table.insert(pending,i,task); break end
+		end
+	end
+	pending.count = pending.count +1
+	return task
+end
+
+function tasks.Run(id)
+	-- run a persistent task immediately; if repeats the original schedule will still apply else task.at is replaced and the task may reschedule
+	-- id can be a handler name
+	local task = db.tasks[id]
+	local pending = tasks.pending
+	for i=1,pending.count do
+		if pending[i] ==task then
+			table.remove(pending,i)
+			pending.count = pending.count -1
+			return tasks.runner(task)
+		end
+	end
+	return nil,'unknown task'
+end
+-- TODO: tasks.Reschedule
+
 
 print = box.session.push -- else goes to log, but in Moonstalk we use explict log functions
 
@@ -176,13 +243,8 @@ do local starter = tarantool.Starter -- preserve the original as we're replacing
 function Starter() -- replaces the default in functions
 	tarantool.started = os.time()
 	starter() -- run the original
-	tt.tasks.pending = databin.Load"tasks_tarantool" or {}
-	tt.tasks.scheduler = fiber.new(tt.tasks.Scheduler)
+	tasks.scheduler_fiber = fiber.new(tasks.scheduler)
 end end
-
-function Shutdown()
-	databin.Save("tasks_tarantool",tt.tasks.pending)
-end
 
 
 -- # database functions
