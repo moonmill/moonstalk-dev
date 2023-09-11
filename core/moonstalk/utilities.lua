@@ -301,7 +301,8 @@ do
 		y = 12
 		yy = 2012
 	--]]
-		-- TDOD: this function needs to invoke a date-format specific compiled function (from server.lua/Initialise) instead of parsing the string on each call to (expensively) handle every possible interpretation
+		-- TODO: this function needs to invoke a date-format specific compiled function (from server.lua/Initialise) instead of parsing the string on each call to (expensively) handle every possible interpretation
+		-- TODO: use a metatable to invoke functions that construct the relevent values upon demand
 
 		local timestamp
 		if not datetime then
@@ -339,16 +340,20 @@ do
 		else
 			datetime.mm = datetime.m
 		end
-		if formatting ~="numeric" and datetime.month==current.month and toggle ~="month" and toggle ~="complete" then
+		if formatting =="numeric" or datetime.month ==current.month and toggle ~="month" and toggle ~="complete" then
 			datetime.M = false
 			datetime.MM = false
 			datetime.MMM = false
 		end
+		local length = 0
 		for pre,placeholder,post in string_gmatch(locale.date[formatting] or terms.dates[formatting] or formatting, "([^dDmMyW]*)([dDmMyW]+)([^dDmMyW|]*)|*") do
 			if datetime[placeholder] ~=false then
-				table_insert(datetime, pre) -- we reuse the table, but only it's array part
-				table_insert(datetime, datetime[placeholder] or l[placeholder][datetime[placeholders[placeholder]]])
-				table_insert(datetime, post)
+				length = length+1
+				datetime[length] = pre -- we reuse the table, but only it's array part
+				length = length+1
+				datetime[length] = datetime[placeholder] or l[placeholder][datetime[placeholders[placeholder]]]
+				length = length+1
+				datetime[length] = post
 			end
 		end
 		return table.concat(datetime)
