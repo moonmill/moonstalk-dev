@@ -332,7 +332,7 @@ do
 		else
 			datetime.dd = datetime.d
 		end
-		datetime.ddd = table.concat{datetime.d,"<sup>",l.OrdinalDayHTML(datetime.d),"</sup>"}
+		datetime.ddd = datetime.d .. l.OrdinalDayHTML(datetime.d)
 		datetime.m = datetime.month
 		if datetime.m < 10 then
 			datetime.mm = "0"..datetime.m

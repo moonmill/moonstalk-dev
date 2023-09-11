@@ -49,11 +49,11 @@ function tasks.runner(task)
 		tasks.errors[task.id or task[1]] = task
 		moonstalk.Error{tt, level="Priority", title="task "..task[1].." failed", detail=err}
 	end
-	task.rescheduled = task.scheduled ~=task.at
+	if task.scheduled ~=task.at then task.rescheduled end
 	task.scheduled = nil
 	if task.repeats or task.rescheduled then -- needs rescheduling (regardless of error)
-		task.runs = (task.runs or 0) +1
 		log.Debug("rescheduling task "..task[1])
+		task.runs = (task.runs or 0) +1
 		tasks.Schedule(task)
 	else -- does not run again
 		task.completed = true
