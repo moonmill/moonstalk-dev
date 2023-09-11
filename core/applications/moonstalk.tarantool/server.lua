@@ -30,6 +30,7 @@ _G.tasks = { -- TODO: move to dedicated application
 	errors = {},
 	wakeup = now, -- time for lazy tasks to be run on next wakeup window
 }
+-- NOTE: tasks are initialised from persistence in Enabler; tasks may thus only be created from a Starter or later
 
 function tasks.runner(task)
 	-- WARNING: expects server to be using UTC (or a time zone without daylight savings changes) and does not use the monotonic fiber.clock; time localisation should be performed with client context
@@ -64,19 +65,6 @@ function tasks.scheduler()
 	-- tasks.pending is ephemeral and rebuilt on intitialisation (just after startup, when this first runs)
 	-- TODO: support resource limits and concurrent tasks (i.e. scheduling a new task if the current is waiting on async actions such as webservices or processes), allow them to run concurrently rather than getting stuck in a single task queue); tasks would thus need to indcate async=false if not cooperative, else indicate their resource usage, e.g. http=1, cpu=1
 	local pending = tasks.pending
-	if not tasks.initialised then
-		-- initialise from persistence
-		local count = 0
-		for _,task in pairs(db.tasks) do
-			if not task.completed then
-				count = count +1
-				pending[count] = task
-			end
-		end
-		pending.count = count
-		util.SortArrayByKey(pending,"at")
-		tasks.initialised = true
-	end
 	while true do
 		local now = tt.now()
 		local wakeup = now +tasks.window
@@ -205,6 +193,18 @@ function Enabler()
 	util.Decrypt = tarantool.Decrypt
 	util.EncodeID = util.Encrypt -- OPTIMIZE: use a cheaper scheme than EcnryptID as this is used frequently to construct URLs containing ids
 	util.DecodeID = util.Decrypt -- OPTIMIZE: use a cheaper scheme than EcnryptID as this is used frequently to construct URLs containing ids
+
+	-- initialise from persistence
+	local pending = tasks.pending
+	local count = 0
+	for _,task in pairs(db.tasks) do
+		if not task.completed then
+			count = count +1
+			pending[count] = task
+		end
+	end
+	pending.count = count
+	util.SortArrayByKey(pending,"at")
 
 	enabler()
 	if not box.space._user.index.name:get{"moonstalk"} then
