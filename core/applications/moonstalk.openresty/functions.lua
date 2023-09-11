@@ -155,6 +155,7 @@ function GetPost() -- REFACTOR: shoud be type specific
 	-- transparently handles file buffering to disk, which can also be configured in nginx.conf per https://github.com/bungle/lua-resty-reqargs
 	-- check request.form._error or the second return argument
 	-- causes processing to wait for the body to be received (it is thus preferable to call after having performed authentication and other preparatory database calls once more or all of the body is likely to have been received, e.g. call it from a controller)
+	-- returns either "form" or "json" which is the key upon which the result is set in the request e.g. post = request[openresty.GetPost()] however use is more simply post = request.json or request.form
 	local request = _G.request
 	if request.type =="application/x-www-form-urlencoded" then
 		moonstalk_Resume(ngx_req_read_body) -- async function (as can be invoked before the full payload has been received)

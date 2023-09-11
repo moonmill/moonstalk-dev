@@ -1018,20 +1018,16 @@ function Collator()
 			if string_match(page_address, urn.pattern) then found = urn; break end
 		end
 	end
-	-- copy values
-	for key,value in pairs(found) do
-		if not page[key] then
-			-- anything not already specified is set as is, including tables that are reused across requests; for tables
-			page[key] = value
-		elseif type(found[key]) =='table' then
-			-- pages always have their own headers table so that it is not reused across requests
-			local branch = found[key]
-			for key,value in pairs(found) do
-				branch[key] = value
-			end
+	-- copy values from address to page
+	for address_key,address_value in pairs(found or EMPTY_TABLE) do
+		-- no inherited address table should be reused in case it can be modified per request as headers are; these tables may however declare _resuable=true if they must not be modified and thus avoid extra duplication and garbage collection
+		page[address_key] = address_value
+		if type(address_value) =='table' and not address_value._reusable then -- applies only to special tables such as form
+			if not page[address_key] then page[address_key] = {} end
+			local copy_to = page[address_key]
+			for copy_key,copy_value in pairs(address_value) do copy_to[copy_key] = copy_value end
 		end
 	end
-	copy(found, page, true, true) -- this must always be recursive copy as tables not in the page and may be modified, which if not copied would persist across different requests; values that are not
 	return found
 end end
 
@@ -1627,6 +1623,7 @@ if file.uri =="terms" then
 		urn.postmark = bundle.id -- allows identification of an address source per-request
 		if urn.authenticator ~=false then urn.Authenticator = scribe.GetTablePath(urn.authenticator) end
 		if bundle.locks and urn.locks ==nil then urn.locks = bundle.locks end -- this allows a site or app to lock all its addresses, except those that explictly set locks=false
+		if urn.post then urn.post._reusable = true end -- prevents copying as a new table, as should be reused, and should generally be declared as a single table assigned to many addresses
 
 		-- convert view and controller names to be unique (bundle-specific)
 		-- convert key syntax to patterns
