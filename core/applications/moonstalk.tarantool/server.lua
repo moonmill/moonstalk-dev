@@ -206,7 +206,7 @@ function Enabler()
 		end
 	end
 	pending.count = count
-	util.SortArrayByKey(pending,"at")
+	util.SortArrayByKey(pending,"at",true)
 
 	enabler()
 	if not box.space._user.index.name:get{"moonstalk"} then
