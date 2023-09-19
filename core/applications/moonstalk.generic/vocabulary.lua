@@ -57,8 +57,8 @@ function vocabulary.fr.OrdinalHTML(number) -- doesn't support gender or plurals
 		return "<sup>ème</sup>"
 	end
 end
-function vocabulary.fr.OrdinalDay(number) if tonumber(number) ==1 then return "er" end end
-function vocabulary.fr.OrdinalDayHTML(number) if tonumber(number) ==1 then return "<sup>er</sup>" end end
+function vocabulary.fr.OrdinalDay(number) if tonumber(number) ==1 then return "er" else return "ème" end end
+function vocabulary.fr.OrdinalDayHTML(number) if tonumber(number) ==1 then return "<sup>er</sup>" else return "<sup>ème</sup>" end end
 
 function vocabulary.de.OrdinalDay(number) return "." end
 vocabulary.de.OrdinalDayHTML = vocabulary.de.OrdinalDay
