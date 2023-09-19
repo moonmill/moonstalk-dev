@@ -45,7 +45,9 @@ function tasks.runner(task)
 	task.finished = tt.now() -- timer only, does not indicate completed
 	task.duration = task.finished - task.started
 	task.started = nil
-	if failure or not result and error then
+	if result and not failure then
+		task.error = nil
+	else
 		task.error = error or failure
 		tasks.errors[task.id or task[1]] = task
 		moonstalk.Error{tt, level="Priority", title="task "..task[1].." failed", detail=err}
