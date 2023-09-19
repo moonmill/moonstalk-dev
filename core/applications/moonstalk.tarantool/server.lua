@@ -132,7 +132,7 @@ function tasks.Schedule(task)
 		pending[pending.count+1] = task
 		if task.at <tasks.wakeup then
 			log.Debug("restarting scheduler")
-			tasks.scheduler_fiber:cancel() -- stops at first yield following this call
+			if tasks.scheduler_fiber then tasks.scheduler_fiber:cancel() end -- stops at first yield following this call
 			tasks.scheduler_fiber = fiber.new(tasks.scheduler)
 			tasks.scheduler_fiber:name"scheduler"
 		end
