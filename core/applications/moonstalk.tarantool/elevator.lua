@@ -24,8 +24,8 @@ local function Started(command,role)
 		display.error(result)
 		return
 	end
-	result = util.Shell(elevator.deprivelege("sleep 1; touch temporary/tarantool/"..role..".log; tail -r temporary/tarantool/"..role..".log | grep -m 1 -e 'Start failed' -e 'LuajitError'")) -- we may be attempting to check too soon
-	-- FIXME: look for "stopped" to indicate failure
+	result = util.Shell(elevator.deprivelege("sleep 1; touch temporary/tarantool/"..role..".log; head -n 50 temporary/tarantool/"..role..".log | grep -m 1 -e 'Start failed' -e 'LuajitError'")) -- we may be attempting to check too soon
+	-- FIXME: look for "stopped" to indicate failure -- TODO: use a moonstalk Starter /Finaliser to log a ready statement, or better, connect to check it via a Started function called by the elevator for every server app
 	if not result then return true end -- log indicates started
 	terminal.red"error "
 	display.error(string.match(result,">(.+)"))

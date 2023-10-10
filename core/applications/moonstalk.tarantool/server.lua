@@ -91,7 +91,10 @@ end
 function tasks.Persistent(task)
 	-- initialise a task that persists and may thus be polled, preserves original if already created, thus only initialises if not existing; ephemeral tasks must be removed by their polling mechanism -- TODO: expiry task to remove completed tasks, probably using a tasks.expire window
 	-- id = true to create a unique ID, or specify the identifier for polling instead of the handler name, e.g. when a handler is used by multiple individual tasks
-	if db.tasks[task.id or task[1]] then return db.tasks[task.id or task[1]] end
+	if db.tasks[task.id or task[1]] then
+		-- TODO: if the time spec or other values have changed, update them
+		return db.tasks[task.id or task[1]]
+	end
 	if task.id ==true then task.id = util.CreateID() end
 	db.tasks[task.id or task[1]] = task
 	task.persistent = true
