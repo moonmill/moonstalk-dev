@@ -1,21 +1,3 @@
-
-de.Ordinal		= "." -- e.g. "9."
-pl.Ordinal 		= "."
-da.Ordinal 		= "."
-et.Ordinal 		= "."
-lv.Ordinal 		= "."
-no.Ordinal 		= "."
-tr.Ordinal 		= "."
-sl.Ordinal 		= "."
-sk.Ordinal 		= "."
-hu.Ordinal 		= "."
-cs.Ordinal 		= "."
-sr.Ordinal 		= "."
-hr.Ordinal 		= "."
-
-pt.Ordinal 		= "." -- TODO: handle gender suffix indicators ºª
-es.Ordinal 		= "." -- TODO: handle gender suffix indicators ºª
-
 function vocabulary.en.Ordinal(number)
 	number = tonumber(number)
 	if number ==11 or number==12 or number==13 then
@@ -60,8 +42,23 @@ end
 function vocabulary.fr.OrdinalDay(number) if tonumber(number) ==1 then return "er" else return "" end end
 function vocabulary.fr.OrdinalDayHTML(number) if tonumber(number) ==1 then return "<sup>er</sup>" else return "" end end
 
-function vocabulary.de.OrdinalDay(number) return "." end
-vocabulary.de.OrdinalDayHTML = vocabulary.de.OrdinalDay
+local function Ordinal_none() return end
+local function Ordinal_period() return "." end -- e.g. "9." -- IDEA: slightly unfortunate to have to use a function call for languages using strings without auxillary logic, could instead encourage use as «l.ordinal or l.Ordinal(n)»
+local ordinal_period = "."
+local langs = {"pl","da","et","lv","no","tr","sl","sk","hu","cs","sr","hr"}
+for i=1,#langs do
+	local vocab = vocabulary[langs[i]]
+	vocab.ordinal = vocab.ordinal or ordinal_period
+	vocab.Ordinal = vocab.Ordinal or Ordinal_period
+	vocab.OrdinalDay = vocab.OrdinalDay or Ordinal_period
+	vocab.OrdinalDayHTML = vocab.OrdinalDayHTML or Ordinal_period
+end
+
+vocabulary.de.Ordinal = Ordinal_none
+vocabulary.de.OrdinalDay = Ordinal_period
+vocabulary.de.OrdinalDayHTML = Ordinal_period
+
+-- TODO: handle gender suffix indicators ºª in pt and es
 
 --[[vocabulary.id.OrdinalPre			= -- TODO: handle prefixes
 function(number)
