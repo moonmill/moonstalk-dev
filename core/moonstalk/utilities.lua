@@ -806,7 +806,6 @@ _G.wrapif = WrapIf
 
 
 function Keyed(a,b,c)
-	-- keyed {table} or keyed("key", "value", {table}) or keyed "alphabet-string" or keyed{key-value}
 	-- general purpose for configs; not optimised
 	-- modifies either an array table into a hashmap supporting indexed lookups of its values without iteration (at the expense of additional memory use for the hashmap pointers) or inverts a hashmap so that values can also be looked up for their names (must not contain an array)
 	-- when passed only a string, returns a table with every char set in that string as a key and also having an array part with the char at its original string position e.g. keyed"abc" becomes {"a","b","c";a=true,b=true,c=true}
@@ -2131,6 +2130,16 @@ function Match(these,those)
 	end
 end
 
+function ArrayToMap(array)
+	-- returns a lookup map table for an array of values
+	-- keyed not only uses numbers as values, but also modifies the original table
+	local map = {}
+	for _,key in ipairs(array) do
+		map[key] = true
+	end
+	return map
+end
+
 function ArrayAddKeyed(to, value, maxlength, first)
 	-- adds a value to a keyed table if not already in the table
 	if not to[value] then
@@ -3212,7 +3221,7 @@ function ShortToken(length,alphabet)
 end
 end
 
-local alphabet = {chars="JWDFKMQLNPABCSTGHVYXRZ4589267"} -- no vowels prevents creation of words, similarly doesn't use 0,1,3 -- TODO: randomise and save to node -- TODO: allow alphabet to be specified
+local alphabet = {chars="JWDFKMQLNPABCSTGHVYXRZ4589267"} -- no vowels prevents creation of words, similarly doesn't use 0,1,3 -- TODO: randomise and save to node -- TODO: allow alphabet to be specified -- FIXME: remove A as was overlooked!
 for i=1,#alphabet.chars do
 	local letter = string.sub(alphabet.chars,i,i)
 	alphabet[letter] = i
