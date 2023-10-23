@@ -213,26 +213,24 @@ function Request() -- request can be built in the server, typically by calling t
 		end
 
 		if request.cookies.preferences then
+			-- preferences are assumed to have valid values
 			-- the preferences cookie is strictly an application routine, but is never expected to be used alongside a session and should be removed when a (persistent) session is established  (typically populated by a database interface); it is sufficiently common that we inline the condition handling rather than invoking additional handlers; the normalised keys from this thus need copying
 			page.state = 5
+			local client = request.client
 			client.preferences = json.decode(request.cookies.preferences) or log.Debug("bad preferences: "..request.cookies.preferences) or EMPTY_TABLE
 			client.language = client.preferences.language
 			client.locale = client.preferences.locale
 			client.timezone = client.preferences.timezone
 		elseif site.polyglot and request.headers['accept-language'] then
+			-- FIXME: site.vocabulary currently has all languages in it for soem reason!! -- this is built from translated views, and the site's own vocabulary, so must define languages that shall be supported for matching with a client; client.language will thus never be an unsupported value and cannot be used for profiling
 			page.state = 5
 			local client = request.client
-			for lang_locale,language,locale in string_gmatch(string_lower( request.headers['accept-language'] ),"[q%A]*((%a*)%-?(%a*))") do -- FIXME: can be a table
-				if language =="" then break
-				elseif site.polyglot==true or site.polyglot[language] then -- FIXME: site.vocabulary currently has all languages in it for soem reason!! -- this is built from translated views, and the site's own vocabulary, so must define languages that shall be supported for matching with a client; client.language will thus never be an unsupported value and cannot be used for profiling
-					client.language = language
-					if locale and locales[lang_locale_match] then
-						client.locale = lang_locale_match
-					elseif locales[locale] then
-						client.locale = locale
-					end
-					break
-				end
+			for lang_locale,language,locale in string_gmatch(string_lower( request.headers['accept-language'] ),"(%a+)%-?(%a*)") do -- this is not so efficient as iterates every value thus attempts to lookup q= but we break once both language and locale match
+				if not client.language and site.translated[language] then client.language = language end
+				if locale and locales[locale] then client.locale = locale; break end
+			end
+			if not client.locale then
+				client.locale = locales[client.language] and client.language or site.locale
 			end
 			client.language = client.language or site.language -- final fallback
 		end
