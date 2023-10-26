@@ -255,13 +255,17 @@ end end
 -- # database functions
 
 function Get(table,key,fieldset)
-	return box.space[table]:get(key) -- TODO: trim to fieldset
+	return box.space[table]:get(key):tomap{names_only=true} -- TODO: trim to fieldset
 end
 
 function GetGlobal(key)
 	-- TODO: needs to simply be an interface on the client database table
 	log.Append(util.TablePath(key) or "NONE")
 	return util.TablePath(key)
+end
+
+function Insert(table,record)
+	return box.space[table]:insert(record)
 end
 
 do local string_match =string.match
