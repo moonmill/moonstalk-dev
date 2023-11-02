@@ -327,6 +327,7 @@ local log=log; -- required for async
 local function sync_err(request) return request.response,request.response.error end
 function http_Request(request)
 	-- TODO: connection pooling, by default we assume a connection is not reusable
+	-- NOTE: see generic/functions for standard interface options
 	-- request = {url="http://host:port/path", method="GET", headers={Name="value"}, timeout=millis, json={…}, body=[[text]], urlencoded={…}, handler=namespace or function, defer=secs, ssl_verify=false}
 	-- returns response,response.error -- NOTE: do not use 'if not response'; HTTP status codes other than 2xx do not return an error parameter but do return response.error with the code; presence of response.error without response.code implies a localised error
 	-- response.json is a table if the response content-type is application/json
@@ -376,7 +377,7 @@ function http_New(request)
 	end
 	request.method = request.method or "GET"
 	log.Info(request.method.." "..request.url)
-	if request.log ~=false then if request.log =="dump" then scribe.Dump(request,"http") else log.Debug(request) end end
+	log.Debug() if request.log =="dump" then scribe.Dump(request,"http") elseif request.log then log.Debug(request) end
 
 	local response,error = moonstalk_Resume(http.request_uri, client, request.url, request)
 	response = response or {}
@@ -403,7 +404,9 @@ function http_New(request)
 		response.json,err = json.decode(response.body)
 		if err then response.error = "JSON: "..err; log.Alert(response); return (request._handler or sync_err)(request) end
 	end
-	if request.log ~=false then log.Info(response) end
+	if request.log ~=false then
+		log.Info(response)
+	end
 	if request._handler then request._handler(response,request) end -- contains request.response, no need to return as async
 	return response
 end

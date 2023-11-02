@@ -300,6 +300,7 @@ do if not http.New then
 		-- method is optional, default is GET or POST with json, body or urlencoded
 		-- response.json is a table if the response content-type is application/json
 		-- returns response,error -- NOTE: always use 'if err' not 'if not response' as the response object may nonetheless be returned with an error such as if it could not be decoded
+		-- logging = nil|"dump"|true|false; nil (default) logs responses at info and debug levels, true also requests at debug level; "dump" will use the Dump function to write requests and responses to a file instead; false disables logging; at levels higher than Info logging is disabled and may be handled conditionally in the calling function (which may necessitate a handler if async)
 		if request.timeout then httpclient.TIMEOUT = request.timeout/1000 else httpclient.TIMEOUT = 1 end
 		request.headers = request.headers or {}
 		if request.urlencoded then
@@ -314,7 +315,7 @@ do if not http.New then
 		request.method = request.method or "GET"
 		log.Info(request.method.." "..request.url)
 		request.headers.Host = request.headers.Host or string.match(request.url,"^.-//(.-)/")
-		if request.log ~=false then if request.log =="dump" then scribe.Dump(request,"http") else log.Debug(request) end end
+		log.Debug() if request.log =="dump" then scribe.Dump(request,"http") elseif request.log then log.Debug(request) end
 		local sink = {}
 		request.sink = ltn12.sink.table(sink) -- new table for response body
 		local success, code, headers = httpclient.request(request)
@@ -326,7 +327,9 @@ do if not http.New then
 			response.json,err = json.decode(response.body)
 			if err then response._err = err; log.Alert(response); return nil,"JSON: "..err end
 		end
-		if request.log ~=false then log.Info(response) end
+		if request.log ~=false then
+			log.Info(response)
+		end
 		return response
 	end
 	http.Request = http.Request or http.New -- no differentiation as deferred and async are not currently supported -- TODO: use task for deferred and call async regardless even though blocking

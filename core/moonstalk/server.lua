@@ -196,14 +196,7 @@ do
 			bundle.enum = _G.enum
 			imported,err = util.ImportLuaFile(bundle.path.."/settings.lua", bundle)
 			bundle.enum = nil
-			if err then
-				moonstalk.Error{bundle,title="Error loading settings for "..bundle.id,detail=err, level="Notice"}
-			else
-				for langid,language in pairs(bundle.vocabulary or {}) do
-					language._id = langid
-					language._plurals = (languages[langid] or {}).plurals
-				end
-			end
+			if err then moonstalk.Error{bundle,title="Error loading settings for "..bundle.id,detail=err, level="Notice"} end
 		end
 		if node.environment ~="production" and bundle.development then
 			log.Info("using development settings")
@@ -975,15 +968,8 @@ end
 
 local languages = languages
 function moonstalk.plural(_,term,number)
-	if vocab1[term] and languages[vocab1._id].plurals then
-		return languages[vocab1._id].plurals (vocab1[term],number)
-	elseif vocab2[term] and languages[vocab2._id].plurals then
-		return languages[vocab2._id].plurals (vocab2[term],number)
-	elseif vocab3[term] and languages[vocab3._id].plurals then
-		return languages[vocab3._id].plurals (vocab3[term],number)
-	else
-		return moonstalk.translate(nil,term)
-	end
+	if not languages[page.language].plurals then log.Debug"NONE" return moonstalk.translate(nil,term) end
+	return languages[page.language].plurals(vocab1[term] or vocab2[term] or vocab3[term], number)
 end
 
 do
