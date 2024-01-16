@@ -3,7 +3,7 @@
 -- OPTIMIZE: use a top level pcall in openresty and remove the view/controller pcalls except in dev mode as they provide more nuanced errors; but such a generic handler could in any case simply look at the page.state to define it's error title; we could also re-run the request enabling xpcall instead
 -- WARNING: pages with variable content must set page.modified=false (e.g. on their address) or to the timestamp of their most recent content (using their controller); else they will use their primary view's modified date reuslting in caching being used
 
-states = {[0]="creation",[1]="curation",[2]="collation",[3]="form",[4]="identification",[5]="authentication",[6]="controller",[7]="view",[8]="template",[9]="",[10]="editing",[15]="abandoned"} -- only controller and view are set in all modes (due to introspection requirement for extensions), otherwise dev mode is required
+states = {[0]="initialisation",[10]="curation",[20]="collation",[3]="form",[22]="authentication",[4]="localisation",[24]="controller",[25]="view",[26]="template",[27]="editing",[9]="abandon"} -- only controller and view are set in all modes (due to introspection requirement for extensions), otherwise dev mode is required
 editors = {} -- points for functions to names
 
 default_site = {
@@ -26,6 +26,7 @@ default_site = {
 	-- domains={}, -- created conditionally
 	applications={},
 	redirect=true,
+	-- vocabulary can contain arbitrary languages such as from applications, thus we use the polyglot table if 
 }
 
 hits = 0
@@ -42,7 +43,6 @@ do -- Lua has an optimised register that cheaply handles many upvalues, thus des
 local pairs = pairs
 local ipairs = ipairs
 local tonumber = tonumber
-local pcall = pcall
 local string_lower = string.lower
 local string_gmatch = string.gmatch
 local string_find = string.find
@@ -112,7 +112,7 @@ function Request() -- request can be built in the server, typically by calling t
 	local site = domains[request.domain] -- most efficent way of mapping and finding sites
 	if not site then
 		-- Invoke application curators
-		page.state = 1
+		page.state = 10
 		for i=1,scribe_curators.count do
 			-- check all curators until one returns a site; the default (and last) is the scribe.Curator which handles unknown domains
 			site = scribe_curators[i]()
@@ -124,13 +124,14 @@ function Request() -- request can be built in the server, typically by calling t
 	log.Info() if node.environment ~="production" and site.domains[request.domain] and site.domains[request.domain].staging then site.domain = request.domain end -- DEV FEATURE ensures staging domains are used in place of the default; must check if domain is defined as wildcard domains will not and can not be used for staging; only enabled with high log level thus typically not on production servers
 
 	-- # Routing etc : Map the view/controller
-	page.state = 2
-	for _,Collator in ipairs(page.collate or site.collate) do -- NOTE: if a curator wishes to prevent collation then it may set page.collate = {}
-		if Collator() then page.collated = true; break end
-		-- typically used to retreive and populate data, notably the page; must explictly return true to prevent any following collators from running (such as for default not found page handler); may also act upon globals such as user, and retreive and set static page content by calling write(content), set page.controller or page.view etc; should identify and populate user and preferences, with scribe.Token() and SetSession() as appropriate
-		-- may also be set by the Curator/Binder site.collate={Function, …}; or page.collate={} for sites or pages that do not need collation
+	if not page.collated then -- NOTE: if a curator wishes to prevent collation because it has done so, then it should set page.collated = true
+		page.state = 20
+		for _,Collator in ipairs(page.collate or site.collate) do
+			if Collator() then page.collated = true; break end
+			-- typically used to retreive and populate data, notably the page; must explictly return true to prevent any following collators from running (such as for default not found page handler); may also act upon globals such as user, and retreive and set static page content by calling write(content), set page.controller or page.view etc; should identify and populate user and preferences, with scribe.Token() and SetSession() as appropriate
+			-- may also be set by the Curator/Binder site.collate={Function, …}; or page.collate={} for sites or pages that do not need collation
+		end
 	end
-
 	if not page.collated then
 		page.view = "generic/not-found"
 		request.form = EMPTY_TABLE
@@ -167,7 +168,7 @@ function Request() -- request can be built in the server, typically by calling t
 			end		
 			-- Log the form, but truncating long values
 			log.Debug() local logform=truncate(form,42) if form.password then logform.password="…" end log.Debug(logform)
-		else -- FIXME: ionstead of this we should just set a default for form, bearing in mind authentication expects it
+		else -- FIXME: instead of this we should just set a default for form, bearing in mind authentication expects it
 			request.form = EMPTY_TABLE
 		end
 	end
@@ -185,7 +186,7 @@ function Request() -- request can be built in the server, typically by calling t
 	-- # client authentication
 	-- this depends upon page.locks, however authentication may be disabled with locks=false; a collator may perform authentication earlier; use of locks requires authenticator="namespace.Function", either inherited from site, specified on an address, or added to the page as a page.Authenticator function by a collator
 	if page.locks or (page.locks ~=false and page.Authenticator or site.Authenticator) then
-		page.state = 4
+		page.state = 22
 		local unlocked
 		if (client.id or request.form.action =="Signin") and (page.Authenticator or site.Authenticator)() and page.locks then -- authenticator functions must return true if they succeed in getting a user; error cases should return scribe.Error; authenticators fetch the user identified by the request.client.token and populate the _G.user table generally with at least nick and a keychain
 			-- to avoid invoking when unnecessary, either the token cookie needs to be present (i.e. set upon signin) or a token query param needs to be provided which the authenticator will usually attempt to exchange for a corresponding cookie; authenticator functions should not invoke errors if the token is invalid and should generally remove it silently; if a page is locked after invocation the scribe will itself show the authenticate page
@@ -207,40 +208,41 @@ function Request() -- request can be built in the server, typically by calling t
 		end
 	end
 
+
+	-- # Localisation
+	-- a locale is required by most applications; and is derived from request and user; but may be overridden in sites using localise=false
+	-- a language is required for collators to select localised page content (but should fallback to site default or first available)
+
+	page.state = 4
 	if not user then -- there's no token or authentication failed
 		if site.polyglot and not page.language then -- not relevent for non-localised sites; must not set if the page declared a language (has a translated address, as preferences have not been applied which we're about to do) -- NOTE: this is not strictly a core function however until we refactor to chained handlers it is necessary at this point and is very low cost
 			page.headers.Vary = util.AppendToDelimited("Cookie", page.headers.Vary, ",") -- ensure caches refresh content when requested with a different language
 		end
 
+		local client = request.client
 		if request.cookies.preferences then
 			-- preferences are assumed to have valid values
 			-- the preferences cookie is strictly an application routine, but is never expected to be used alongside a session and should be removed when a (persistent) session is established  (typically populated by a database interface); it is sufficiently common that we inline the condition handling rather than invoking additional handlers; the normalised keys from this thus need copying
-			page.state = 5
-			local client = request.client
 			client.preferences = json.decode(request.cookies.preferences) or log.Debug("bad preferences: "..request.cookies.preferences) or EMPTY_TABLE
 			client.language = client.preferences.language
 			client.locale = client.preferences.locale
 			client.timezone = client.preferences.timezone
 		elseif site.polyglot and request.headers['accept-language'] then
 			-- FIXME: site.vocabulary currently has all languages in it for soem reason!! -- this is built from translated views, and the site's own vocabulary, so must define languages that shall be supported for matching with a client; client.language will thus never be an unsupported value and cannot be used for profiling
-			page.state = 5
-			local client = request.client
-			for lang_locale,language,locale in string_gmatch(string_lower( request.headers['accept-language'] ),"(%a+)%-?(%a*)") do -- this is not so efficient as iterates every value thus attempts to lookup q= but we break once both language and locale match
-				if not client.language and site.translated[language] then client.language = language end
-				if locale and locales[locale] then client.locale = locale; break end
+			for lang_locale,language,locale in string_gmatch(string_lower( request.headers['accept-language'] ),"(([^%-,;]+)%-?([^,;]*));?[^,]*") do -- iterate every value until a locale matches -- BUG: (very rare) when multiple headers are present the value is an array of their values; such malformed requests should be caught and responded to with a 400
+				-- we define the language by the first matched; locale=="" when not defined, and lang_locale is thus a valid lookup identical to language
+				if not client.language and site.polyglot[lang_locale or language] then client.language = lang_locale or language end
+				if locale and locales[lang_locale or locale] then client.locale = lang_locale or locale; break end
 			end
-			if not client.locale then
-				client.locale = locales[client.language] and client.language or site.locale
-			end
-			client.language = client.language or site.language -- final fallback
+		end
+		if not client.language then
+			client.language = site.language
+		end
+		if not client.locale then
+			client.locale = locales[client.language] and client.language or site.locale
 		end
 	end
 
-
-
-	-- # Localisation
-	-- a locale is required by most applications; and is derived from request and user; but may be overridden in sites using localise=false
-	-- a language is required for collators to select localised page content (but should fallback to site default or first available)
 	log.Debug(client)
 	log.Debug() if page.view and page.vocabulary and lfs.attributes(site.files[page.view..".vocab.lua"].path,"modification") > site.files[page.view..".vocab.lua"].imported then local view=site.views[page.view]; scribe.ImportViewVocabulary(site,view); page.vocabulary=view.vocabulary end -- as the vocabulary was already assigned from the address, in dev mode we must reassign it if changed
 	local env_language = moonstalk_Environment(client, site, page)
@@ -252,16 +254,16 @@ function Request() -- request can be built in the server, typically by calling t
 	--log.Debug(); local _sections=page.sections; page.sections=nil; log.Debug(page);page.sections=_sections
 
 	if page.controller then
-		page.state = 6
+		page.state = 24
 		scribe_Controller(page.controller)
 	end
 	if page.view then -- defined by binder/address although a controller may specify it instead of calling scribe.View directly
-		page.state = 7
+		page.state = 25
 		scribe_View(page.view) -- final call, flag to render not-found view
 	end
 
 	if page.type =="html" and page.template ~=false then -- page.template==nil infers use of site.template; page.type~=html infers no template
-		page.state = 8
+		page.state = 26
 		scribe_Section "template"
 		if site.controllers[page.template or site.template] then scribe_Controller(page.template or site.template) end
 		scribe_View( page.template or site.template or "generic/template" )
@@ -280,7 +282,7 @@ function Request() -- request can be built in the server, typically by calling t
 
 	if page.editors then
 		-- editors are applied to all content-types, thus they must check this themselves
-		page.state = 10
+		page.state = 27
 		for _,Editor in ipairs(page.editors) do
 			log.Debug("applying "..(scribe.editors[Editor] or "anonymous page.Editor"))
 			Editor()
@@ -361,24 +363,6 @@ function View(path)
 		return true
 	else
 		view.loader()
-		--[[
-		local result,response = xpcall(view.loader,debug.traceback)
-		if not result then
-			if string.find(response,"invalid value",1,true) then
-				result = string.match(response,"at index (%d+)")
-				local section = page.sections.content -- TODO: this does not catch errors elsewhere
-				response = web.SafeHtml(table.concat(util.Slice(section,result-20,result-1)))
-				.."**"..tostring(section[result]).."**"..
-				web.SafeHtml(table.concat(util.Slice(section,result+1,result+20)))
-
-				-- log.Alert{realm="page",title="Invalid value in output", detail=response}
-				return scribe.Error{realm="page",title="Invalid value in output", detail=response} -- we don't know which view that output position corresponds to -- TODO: record positions when we call View() -- FIXME: breaks
-			else
-				return scribe.Errorxp{realm="page",title="Error in view "..view.id, detail=string.gsub(string.gsub(response,view.id..":.-in main chunk\n",""),view.id..":","line ")}
-			end
-		end
-		return result
-		--]]
 	end
 	if page.modified ==nil then page.modified = view.modified end -- best practice is to have a modified date so we use that of the first rendered view, typically the main content, otherwise must be explictly set; -- NOTE: view may set modified = false as this runs after the view
 end
@@ -397,11 +381,11 @@ function Extensions(name,env)
 	-- returns true if all extensions ran without requesting an interrupt; otherwise returns nil if any extension returns a value other than nil to request an interrupt (by returning false); it is the responsibility of the calling function to check the return value and proceed/interrupt as appropriate
 	name = name or page.view or page.controller -- inherits from address
 	local status = true
-	if page.state ==6 and site.controllers[name] and site.controllers[name].extensions then
+	if page.state ==24 and site.controllers[name] and site.controllers[name].extensions then
 		for _,controller in ipairs(site.views[name].extensions) do
 			if scribe.Controller(controller.id, env) ~=nil then status = nil end
 		end
-	elseif page.state ==7 and site.views[name] and site.views[name].extensions then
+	elseif page.state ==25 and site.views[name] and site.views[name].extensions then
 		for id,view in ipairs(site.views[name].extensions) do
 			if scribe.View(view.id, env) ~=nil then status = nil end
 		end
@@ -483,6 +467,7 @@ function Unauthorised()
 end
 
 function RequestURL()
+	-- IDEA: a metatable would provide a neater interface
 	if not request.url then
 		request.url = request.scheme.."://"..request.domain..request.path
 		if request.query_string then request.url = request.url .."?".. request.query_string end
@@ -1153,31 +1138,31 @@ end end
 
 function Errored(err,trace)
 	-- handles an error caught interrupting scribe.Request
-	local state = scribe.states[page.state]
-	err = {title="Error in "..state, detail=err, trace=trace}
-	if type(page[state]) =='string' then
-		err.title = err.title .." '".. page[state] .."'"
-	end
-	if trace then
-		scribe.Errorxp(err)
-	else
-		scribe.Error(err)
-	end
+	err = {
+		title = "Error in "..scribe.states[page.state] or page.state, -- pages may set their own states
+		detail = err,
+		trace = trace,
+		level = page.state >=20 and 'Alert', -- errors in app or site components are elevated, otherwise not; this is relevent when logging is wrapped e.g. for notification with Slack
+	}
+	scribe.Error(err)
 	scribe.AbandonedEditor()
 	page.headers["Content-Type"] = page.headers["Content-Type"] or "text/html"
 end
 
-function Error(err)
+function Error(err,trace)
 	-- cancels server processing to show an error page
 	-- proagation to other services can be handled by wrapping this function
 	-- err.public=true if the detail is to be shown in the response instead of hidden (unless dev); in the case of the generic error page
 	-- err.level=false if the error has already been reported and this function should only propagate as a response page, not to moonstalk.Errror
-	if type(err) ~="table" then err = {scribe, title=tostring(err)}
-	elseif not err[1] then err[1] = scribe end
-	if err.level ~=false then
-		-- TODO: aggregrate into bundle errors using moonstalk.Error
-		log[err.level or 'Info'](table.concat({err[1].id, err.title or "",err.detail}," | "))
+	if type(err) ~='table' then err = {title=tostring(err)} end
+	if trace or err.trace then scribe.ErrorTrace(err,trace) end
+	if page.state >=20 and err.level ~=false then
+		-- propagate to site
+		err[1] = site
+		site.errors = site.errors or {}
+		--moonstalk.Error(err)
 	end
+	err[1] = err[1] or scribe
 	if moonstalk.ready then err.at = request.url or scribe.RequestURL() end
 	if err.title =="true" or err.detail==true then return end -- already caught
 	err.instance = moonstalk.instance -- when in a cluster where errors are collected centrally
@@ -1189,9 +1174,8 @@ function Error(err)
 	return nil,err.title
 end
 
-function Errorxp(err)
-	log.Info(err)
-	if type(err) ~="table" then err = {realm="site",detail=err} end
+function ErrorTrace(err,trace)
+	err.trace = err.trace or trace
 	err.detail = string.gsub(err.detail,'"]','')
 	err.detail = string.gsub(err.detail,'%[string "','')
 	err.detail,err.trace = string.match(err.detail,"(.-)stack traceback%:\n\t(.+)")
@@ -1212,7 +1196,6 @@ function Errorxp(err)
 	else
 		err.trace = nil
 	end
-	scribe.Error(err)
 end
 
 function Dump(data,hint)
@@ -1414,8 +1397,7 @@ function LoadView(view)
 	if string.find(data,"?(",1,true) or string.find(data,"<?",1,true) then -- regardless of format, may be using variables or code
 		view.loader,err = loadstring(scribe.ParseView(scribe.TranslateView(data,view),view),view.id)
 		if err then -- TODO: stack traceback
-			view.loader = function () scribe.Error({realm="page",title="Error loading view", detail=err}) end
-			scribe.Error({realm="page",title="Error loading view", detail=err})
+			view.loader = function () scribe.Error{realm="page",title="Error loading view", detail=err} end
 		end
 		--setfenv(view.loader,_G)
 	else
@@ -1525,10 +1507,7 @@ function ConfigureBundle(bundle,kind)
 				else
 					file.id = util.Transliterate(file.uri,true)
 				end
-if file.uri =="terms" then
-	log.Debug(util.Serialise(file.locales,1))
-	end
-				
+
 				local subfolder = string.match(file.id,"^(.*)/")
 				if kind ~="sites" then
 					-- all applications resources must be prefixed with their id
